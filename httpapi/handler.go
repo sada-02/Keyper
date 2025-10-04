@@ -19,6 +19,7 @@ type Handler struct {
 	Store    *store.BadgerStore
 	NodeID   string
 	RaftNode *raftnode.Node // nil if Raft disabled
+
 }
 
 // NewHandler builds a Handler.
@@ -87,7 +88,42 @@ func (h *Handler) keyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodGet:
-		// For simplicity: direct read from store.
+		// Linearizable read:
+		if h.RaftNode != nil {
+			// If follower -> redirect client to leader
+			if h.RaftNode.Raft.State() != raft.Leader {
+				leader := h.RaftNode.Leader()
+				if leader != "" {
+					w.Header().Set("X-Raft-Leader", leader)
+				}
+				// ask client to retry at leader (307 Temporary Redirect)
+				http.Error(w, "not leader — read must go to leader", http.StatusTemporaryRedirect)
+				return
+			}
+
+			// We are leader: issue a Barrier so that all preceding commits are applied
+			// before serving the read. Barrier returns a Future.
+			barrierFut := h.RaftNode.Raft.Barrier(5 * time.Second)
+			if err := barrierFut.Error(); err != nil {
+				http.Error(w, "raft barrier failed: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// Now safe to read from local store (linearizable)
+			val, err := h.Store.Get([]byte(key))
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					http.Error(w, "not found", http.StatusNotFound)
+					return
+				}
+				http.Error(w, "get failed: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Write(val)
+			return
+		}
+
+		// Raft not enabled -> direct read (best-effort)
 		val, err := h.Store.Get([]byte(key))
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
