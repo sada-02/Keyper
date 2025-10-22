@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-// ShardManager keeps track of shards hosted on this node.
+// ShardManager keeps track of shard IDs hosted on this node.
 type ShardManager struct {
 	mu     sync.RWMutex
 	shards map[string]struct{} // map[shardID]present

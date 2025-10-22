@@ -11,6 +11,8 @@ type Config struct {
 	NodeID     string
 	EnableRaft bool
 	RaftAddr   string
+	ShardCount   int
+	RaftBasePort int
 	JoinAddr   string // admin http addr of a node to join, empty => bootstrap single-node
 }
 
@@ -24,5 +26,8 @@ func Load() *Config {
 	flag.StringVar(&c.RaftAddr, "raft-addr", "127.0.0.1:12000", "raft bind address (host:port)")
 	flag.StringVar(&c.JoinAddr, "join", "", "HTTP address of existing node to join (e.g. http://host:8080); empty = bootstrap single-node")
 	flag.Parse()
+	flag.IntVar(&c.ShardCount, "shard-count", 0, "number of shards (0 = no per-shard raft instances started automatically)")
+	flag.IntVar(&c.RaftBasePort, "raft-base-port", 12000, "base port for per-shard raft instances; shard i uses base+ i")
+
 	return &c
 }
