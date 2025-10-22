@@ -17,6 +17,8 @@ import (
 	"github.com/sada-02/keyper/httpapi"
 	raftnode "github.com/sada-02/keyper/raft"
 	"github.com/sada-02/keyper/store"
+	"github.com/sada-02/keyper/shard"
+	shardraft "github.com/sada-02/keyper/shardraft"
 )
 
 func main() {
@@ -36,6 +38,8 @@ func main() {
 	}()
 
 	h := httpapi.NewHandler(st, cfg.NodeID)
+	h.ShardMgr = shard.NewManager()
+	h.ShardRafts = make(map[string]*shardraft.ShardRaft)
 
 	// If Raft enabled, initialize node and attach to handler
 	var rn *raftnode.Node
@@ -66,8 +70,14 @@ func main() {
 		}
 	}
 
+	if cfg.ShardCount > 0 {
+		startShards(cfg, h)
+	}
+
 	mux := http.NewServeMux()
 	h.Register(mux)
+	// register shard admin endpoints
+	h.RegisterShardRoutes(mux)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,
@@ -101,6 +111,24 @@ func main() {
 		f := rn.Raft.Shutdown()
 		_ = f.Error()
 	}
+
+	// Shutdown per-shard raft instances (if any)
+	if h.ShardRafts != nil {
+		for id, sr := range h.ShardRafts {
+			if sr == nil {
+				continue
+			}
+ 			// shut down raft instance
+ 			if sr.Node != nil && sr.Node.Raft != nil {
+ 				_ = sr.Node.Raft.Shutdown()
+ 			}
+ 			// close per-shard store
+ 			if sr.Store != nil {
+ 				_ = sr.Store.Close()
+ 			}
+ 			fmt.Printf("shard %s shut down\n", id)
+ 		}
+ 	}
 }
 
 // joinLeader tries to POST to leaderAddr + "/v1/join" the JSON
