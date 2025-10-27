@@ -1,0 +1,34 @@
+# Go build artifacts
+/bin/
+/build/
+/out/
+*.exe
+*.test
+
+# Go tool caches
+vendor/
+pkg/
+Godeps/
+*.log
+*.pid
+
+# Node / runtime artifacts from scripts
+node*-data/
+node*.log
+node*.pid
+
+# editor/OS files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.DS_Store
+
+# diagnostic / temp directories
+.diagnose/
+tmp/
+*.tmp
+
+# OS-specific
+Thumbs.db
