@@ -4,15 +4,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-
-	"github.com/sada-02/keyper/shard"
-	"github.com/sada-02/keyper/shardraft"
 )
 
 // RegisterShardRoutes registers admin shard endpoints.
 // Requires Handler.ShardMgr to be non-nil.
 func (h *Handler) RegisterShardRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/v1/shards", h.shardsListHandler)           // GET list
+	mux.HandleFunc("/v1/shards", h.shardsListHandler)          // GET list
 	mux.HandleFunc("/v1/shards/assign", h.shardsAssignHandler) // POST assign
 	mux.HandleFunc("/v1/shards/status", h.shardsStatusHandler) // GET status for all local shard rafts
 }
@@ -47,7 +44,7 @@ func (h *Handler) shardsAssignHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ShardID string `json:"shard_id"`
+		ShardID  string `json:"shard_id"`
 		RaftAddr string `json:"raft_addr"` // optional
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
