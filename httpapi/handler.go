@@ -11,15 +11,18 @@ import (
 
 	raft "github.com/hashicorp/raft"
 	raftnode "github.com/sada-02/keyper/raft"
+	"github.com/sada-02/keyper/shard"
+	shardraft "github.com/sada-02/keyper/shardraft"
 	"github.com/sada-02/keyper/store"
 )
 
 // Handler holds dependencies for HTTP endpoints.
 type Handler struct {
-	Store    *store.BadgerStore
-	NodeID   string
-	RaftNode *raftnode.Node // nil if Raft disabled
-
+	Store      *store.BadgerStore
+	NodeID     string
+	RaftNode   *raftnode.Node // nil if Raft disabled
+	ShardMgr   *shard.ShardManager
+	ShardRafts map[string]*shardraft.ShardRaft
 }
 
 // NewHandler builds a Handler.
