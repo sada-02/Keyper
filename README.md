@@ -1,7 +1,7 @@
 Keyper — README (current progress: Phase 1 + Phase 2)
 
 This repository contains a small distributed key-value prototype built in Go using BadgerDB for local persistence and HashiCorp Raft for replication.
-You’ve completed:
+We’ve completed:
 
 Phase 1 — single-node persisted Badger HTTP KV (PUT/GET/DELETE, GET /v1/status).
 
