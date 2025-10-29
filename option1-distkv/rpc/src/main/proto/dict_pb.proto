@@ -1,0 +1,57 @@
+syntax="proto3";
+
+package com.distkv.rpc.protobuf;
+
+option java_package="com.distkv.rpc.protobuf.generated";
+option java_outer_classname="DictProtocol";
+option cc_generic_services = true;
+
+message DistKVDict {
+    repeated string keys = 1;
+    repeated string values = 2;
+}
+
+message DictPutRequest {
+    DistKVDict dict = 1;
+}
+
+message DictPutResponse {
+}
+
+message DictGetRequest {
+}
+
+message DictGetResponse {
+    DistKVDict dict = 1;
+}
+
+message DictGetItemRequest {
+    string itemKey = 1;
+}
+
+message DictGetItemResponse {
+    string itemValue = 1;
+}
+
+message DictPopItemRequest {
+    string itemKey = 1;
+}
+
+message DictPopItemResponse {
+    string itemValue = 1;
+}
+
+message DictPutItemRequest {
+    string itemKey = 1;
+    string itemValue = 2;
+}
+
+message DictPutItemResponse {
+}
+
+message DictRemoveItemRequest {
+    string itemKey = 1;
+}
+
+message DictRemoveItemResponse {
+}

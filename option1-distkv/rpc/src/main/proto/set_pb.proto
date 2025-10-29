@@ -1,0 +1,47 @@
+syntax="proto3";
+
+package com.distkv.rpc.protobuf;
+
+option java_package="com.distkv.rpc.protobuf.generated";
+option java_outer_classname="SetProtocol";
+option cc_generic_services = true;
+
+message SetPutRequest {
+    repeated string values = 1;
+}
+
+message SetPutResponse {
+}
+
+message SetGetRequest {
+}
+
+message SetGetResponse {
+    repeated string values = 1;
+}
+
+message SetPutItemRequest {
+    string itemValue = 1;
+}
+
+message SetPutItemResponse {
+}
+
+message SetRemoveItemRequest {
+    // The entity that will be deleted from the set.
+    string itemValue = 1;
+}
+
+message SetRemoveItemResponse {
+}
+
+//drop the whole set
+//
+message SetExistsRequest {
+    string entity = 1;
+}
+
+message SetExistsResponse {
+    // If status is not OK, the result is undefined.
+    bool result = 1;
+}
