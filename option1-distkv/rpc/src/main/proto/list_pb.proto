@@ -1,0 +1,78 @@
+syntax="proto3";
+
+package com.distkv.rpc.protobuf;
+
+option java_package="com.distkv.rpc.protobuf.generated";
+option java_outer_classname="ListProtocol";
+option cc_generic_services = true;
+
+message ListPutRequest {
+    repeated string values = 1;
+}
+
+message ListPutResponse {
+}
+
+// The type of a `get` request.
+//
+// GET_ALL indicates we should get all of the values of the specific key.
+// GET_ONE indicates we should get a value of the specific index.
+// GET_RANGE indicates that we should get the values of a range index.
+enum GetType {
+    GET_ALL = 0;
+    GET_ONE = 1;
+    GET_RANGE = 2;
+};
+
+// TODO(qwang): comment on this.
+message ListGetRequest {
+    GetType type = 1;
+    int32 index = 2;
+    int32 from = 3;
+    int32 end = 4;
+}
+
+message ListGetResponse {
+    repeated string values = 1;
+}
+
+message ListLPutRequest {
+    repeated string values = 1;
+}
+
+message ListLPutResponse {
+}
+
+message ListRPutRequest {
+    repeated string values = 1;
+}
+
+message ListRPutResponse {
+}
+
+//The type of a 'remove' request
+//
+// RemoveOne indicates we should remove a element of the specific index.
+// RemoveRange indicates we should remove the elements of a range index.
+enum RemoveType {
+    RemoveOne = 0;
+    RemoveRange = 1;
+}
+
+message ListRemoveRequest {
+    RemoveType type = 1;
+    int32 index = 2;
+    int32 from = 3;
+    int32 end = 4;
+}
+
+message ListRemoveResponse {
+}
+
+
+message ListMRemoveRequest {
+    repeated int32 indexes = 1;
+}
+
+message ListMRemoveResponse {
+}

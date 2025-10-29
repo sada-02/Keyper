@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package com.distkv.rpc.protobuf;
+
+import "common_pb.proto";
+
+option java_package = "com.distkv.rpc.protobuf.generated";
+option java_outer_classname = "SlistProtocol";
+option cc_generic_services = true;
+
+message SlistEntity {
+    int32 score = 1;
+    string member = 2;
+}
+
+message SlistPutRequest {
+    repeated SlistEntity list = 1;
+}
+
+message SlistPutResponse {
+}
+
+message SlistTopRequest {
+    uint32 count = 1;
+}
+
+message SlistTopResponse {
+    repeated SlistEntity list = 1;
+}
+
+message SlistIncrScoreRequest {
+    string member = 1;
+    int32 delta = 2;
+}
+
+message SlistIncrScoreResponse {
+}
+
+message SlistPutMemberRequest {
+    int32 score = 1;
+    string member = 2;
+}
+
+message SlistPutMemberResponse {
+}
+
+message SlistRemoveMemberRequest {
+    string member = 1;
+}
+
+message SlistRemoveMemberResponse {
+}
+
+message SlistGetMemberRequest {
+    string member = 1;
+}
+
+message SlistGetMemberResponse {
+    SlistEntity entity = 1;
+    uint32 count = 2;
+}
