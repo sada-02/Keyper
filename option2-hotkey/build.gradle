@@ -1,0 +1,31 @@
+apply plugin: 'kotlin'
+apply plugin: 'application'
+
+version = '1.1'
+
+repositories {
+    mavenCentral()
+}
+
+buildscript {
+    ext.kotlin_version = '0.12.200'
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+dependencies {
+    testCompile group: 'junit', name: 'junit', version: '4.11'
+    compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+}
+
+sourceSets {
+    main.java.srcDirs += 'src/main/kotlin'
+}
+
+mainClassName = "ru.ifmo.ctddev.igushkin.dkvs.Runner"
+applicationName = "dkvs_node"
+applicationDefaultJvmArgs = ['''-Djava.util.logging.SimpleFormatter.format=%1$tY-%1$tm-%1$td %1$tH:%1$tM:%1$tS %5$s%6$s%n''']
