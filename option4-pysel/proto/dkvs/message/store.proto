@@ -1,0 +1,9 @@
+syntax="proto3";
+package dkvs.message;
+
+option go_package = "github.com/pysel/dkvs/prototypes";
+
+message StoredValue {
+    bytes value = 1;
+    uint64 lamport = 2;
+}

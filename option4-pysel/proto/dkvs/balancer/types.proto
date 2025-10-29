@@ -1,0 +1,14 @@
+syntax="proto3";
+
+package dkvs.balancer;
+
+option go_package = "github.com/pysel/dkvs/prototypes/balancer";
+
+message Coverage {
+    repeated Tick ticks = 1;
+}
+
+message Tick {
+    bytes value = 1;
+    int64 covers = 2;
+}

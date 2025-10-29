@@ -1,0 +1,37 @@
+syntax = "proto3";
+package dkvs.partition;
+
+import "dkvs/message/message.proto";
+
+option go_package = "github.com/pysel/dkvs/prototypes/partition";
+
+service PartitionService {
+    rpc Set(dkvs.message.SetRequest) returns (dkvs.message.SetResponse);
+    rpc Get(dkvs.message.GetRequest) returns (dkvs.message.GetResponse);
+    rpc Delete(dkvs.message.DeleteRequest) returns (dkvs.message.DeleteResponse);
+
+    // Two-phase commit 
+    rpc PrepareCommit(PrepareCommitRequest) returns (PrepareCommitResponse);
+    rpc AbortCommit(AbortCommitRequest) returns (AbortCommitResponse);
+    rpc Commit(CommitRequest) returns (CommitResponse);
+
+    // SetHashrange sets this node's hashrange to the given range.
+    rpc SetHashrange(dkvs.message.SetHashrangeRequest) returns (dkvs.message.SetHashrangeResponse);
+}
+
+message PrepareCommitRequest {
+    oneof message {
+        dkvs.message.SetRequest set = 1;
+        dkvs.message.DeleteRequest delete = 2;
+    };
+}
+
+message PrepareCommitResponse {
+    bool ok = 1;
+}
+
+message AbortCommitRequest {}
+message AbortCommitResponse {}
+
+message CommitRequest {}
+message CommitResponse {}

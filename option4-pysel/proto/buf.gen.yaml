@@ -1,0 +1,16 @@
+version: v1
+plugins:
+  - name: go
+    out: .
+    opt: 
+      - paths=import
+  - name: go-grpc
+    out: .
+    opt:
+      - paths=import
+      - require_unimplemented_servers=false
+  - name: validate 
+    out: .
+    opt:
+      - paths=import
+      - lang=go
