@@ -1,0 +1,52 @@
+syntax = "proto3";
+package dkvs.message;
+
+import "validate/validate.proto";
+import "dkvs/message/store.proto";
+
+option go_package = "github.com/pysel/dkvs/prototypes";
+
+// SetRequest is a message that is sent to a node that should store a key
+message SetRequest {
+    bytes key = 1 [(validate.rules).bytes.min_len = 1];
+    bytes value = 2 [(validate.rules).bytes.min_len = 1];
+
+    // a lamport timestamp of this message
+    uint64 lamport = 3;
+
+    // used only between client <-> balancer communications
+    uint64 id = 4;
+}
+
+message SetResponse {}
+
+message GetRequest {
+    bytes key = 1 [(validate.rules).bytes.min_len = 1];
+
+    // a lamport timestamp of this message
+    uint64 lamport = 2;
+
+    // used only between client <-> balancer communications
+    uint64 id = 3;
+}
+message GetResponse {
+    dkvs.message.StoredValue stored_value = 1;
+}
+
+message DeleteRequest {
+    bytes key = 1 [(validate.rules).bytes.min_len = 1];
+
+    // a lamport timestamp of this message
+    uint64 lamport = 2;
+
+    // used only between client <-> balancer communications
+    uint64 id = 3;
+}
+message DeleteResponse {}
+
+message SetHashrangeRequest {
+    bytes min = 1;
+    bytes max = 2;
+}
+
+message SetHashrangeResponse {}
