@@ -8,6 +8,7 @@ import (
 	"time"
 
 	raft "github.com/hashicorp/raft"
+	"github.com/sada-02/keyper/metrics"
 	"github.com/sada-02/keyper/store"
 )
 
@@ -34,16 +35,21 @@ func (f *fsm) Apply(logEntry *raft.Log) interface{} {
 		return fmt.Errorf("failed unmarshal command: %w", err)
 	}
 
+	// Record operation in metrics (use "global" as shard ID for non-sharded)
+	reg := metrics.DefaultRegistry()
+
 	switch cmd.Op {
 	case "set":
 		if err := f.store.Set([]byte(cmd.Key), cmd.Value); err != nil {
 			return fmt.Errorf("set failed: %w", err)
 		}
+		reg.RecordRaftApply("global", "set")
 		return nil
 	case "delete":
 		if err := f.store.Delete([]byte(cmd.Key)); err != nil {
 			return fmt.Errorf("delete failed: %w", err)
 		}
+		reg.RecordRaftApply("global", "delete")
 		return nil
 	default:
 		return fmt.Errorf("unknown op: %s", cmd.Op)

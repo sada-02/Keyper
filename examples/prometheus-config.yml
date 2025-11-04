@@ -1,0 +1,76 @@
+# Prometheus Configuration for Keyper Monitoring
+#
+# Usage:
+#   prometheus --config.file=prometheus-config.yml
+#
+# This configuration scrapes metrics from a 3-node Keyper cluster
+# running on ports 8080, 8081, 8082
+
+global:
+  scrape_interval: 15s      # Scrape every 15 seconds
+  evaluation_interval: 15s   # Evaluate rules every 15 seconds
+  
+  # Attach these labels to all time series
+  external_labels:
+    cluster: 'keyper-prod'
+    environment: 'production'
+
+# Alertmanager configuration (optional)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - localhost:9093
+
+# Load alerting rules
+rule_files:
+  - 'keyper-alerts.yml'
+
+# Scrape configurations
+scrape_configs:
+  # Keyper cluster nodes
+  - job_name: 'keyper-cluster'
+    static_configs:
+      - targets:
+          - 'localhost:8080'  # Node 1
+          - 'localhost:8081'  # Node 2
+          - 'localhost:8082'  # Node 3
+        labels:
+          cluster: 'keyper-prod'
+    
+    # Scrape metrics endpoint
+    metrics_path: /metrics
+    
+    # Scrape interval for this job (overrides global)
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    
+  # Keyper health checks (for uptime monitoring)
+  - job_name: 'keyper-health'
+    static_configs:
+      - targets:
+          - 'localhost:8080'
+          - 'localhost:8081'
+          - 'localhost:8082'
+    
+    metrics_path: /v1/health
+    scrape_interval: 30s
+    
+    # Health endpoint doesn't return Prometheus metrics,
+    # but we can use blackbox_exporter or write a custom exporter
+    # For now, this is commented out as health checks are HTTP-based
+    # Use the main 'keyper-cluster' job for metrics
+
+  # Alternative: Service discovery via Consul/DNS
+  # - job_name: 'keyper-dynamic'
+  #   consul_sd_configs:
+  #     - server: 'localhost:8500'
+  #       services: ['keyper']
+
+# Optional: Remote write to long-term storage
+# remote_write:
+#   - url: 'http://localhost:9009/api/v1/push'  # Prometheus remote storage
+#   - url: 'https://prometheus-us-central1.grafana.net/api/prom/push'  # Grafana Cloud
+#     basic_auth:
+#       username: 'xxx'
+#       password: 'xxx'

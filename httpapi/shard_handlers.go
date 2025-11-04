@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
+	raft "github.com/hashicorp/raft"
 )
 
 // RegisterShardRoutes registers admin shard endpoints.
@@ -79,7 +81,7 @@ func (h *Handler) shardsStatusHandler(w http.ResponseWriter, r *http.Request) {
 				info.NodeID = sr.Node.ID
 				info.RaftAddr = sr.Node.Addr
 				if sr.Node.Raft != nil {
-					info.IsLeader = sr.Node.Raft.State() == 3 // raft.Leader == 3 (avoid import cycle)
+					info.IsLeader = sr.Node.Raft.State() == raft.Leader
 				}
 			}
 			out = append(out, info)

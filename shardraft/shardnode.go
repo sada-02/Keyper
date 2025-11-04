@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/sada-02/keyper/raft"
+	raftnode "github.com/sada-02/keyper/raft"
+	"github.com/sada-02/keyper/shard"
 	"github.com/sada-02/keyper/store"
 )
 
@@ -13,6 +14,7 @@ type ShardRaft struct {
 	ShardID string
 	Node    *raftnode.Node
 	Store   *store.BadgerStore
+	State   *shard.ShardState // Track operational state (read-only, paused, etc.)
 }
 
 // StartShardRaft starts a raft instance for shardID on this node.
@@ -50,6 +52,7 @@ func StartShardRaft(nodeBaseID, shardID, raftAddr, dataDir, joinAddr string) (*S
 		ShardID: shardID,
 		Node:    node,
 		Store:   st,
+		State:   shard.NewShardState(), // Initialize with read-write state
 	}, nil
 }
 

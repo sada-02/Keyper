@@ -1,0 +1,255 @@
+# Prometheus Alert Rules for Keyper
+#
+# These rules define alerts for critical conditions in the Keyper cluster.
+# Place this file in the same directory as prometheus-config.yml and
+# reference it in the rule_files section.
+
+groups:
+  - name: keyper_raft
+    interval: 30s
+    rules:
+      # Alert when no Raft leader exists for a shard
+      - alert: NoRaftLeader
+        expr: max(keyper_raft_state) by (shard_id) < 2
+        for: 1m
+        labels:
+          severity: critical
+          component: raft
+        annotations:
+          summary: "No Raft leader for shard {{ $labels.shard_id }}"
+          description: "Shard {{ $labels.shard_id }} has no Raft leader for more than 1 minute. Writes will fail."
+          runbook_url: "https://docs.keyper.io/runbooks/no-raft-leader"
+
+      # Alert when Raft commit latency is high
+      - alert: HighRaftCommitLatency
+        expr: histogram_quantile(0.99, rate(keyper_raft_commit_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: raft
+        annotations:
+          summary: "High Raft commit latency (P99 > 1s)"
+          description: "Raft commit P99 latency is {{ $value }}s, above 1s threshold for 5 minutes."
+          runbook_url: "https://docs.keyper.io/runbooks/high-raft-latency"
+
+      # Alert when a node has lost contact with Raft leader
+      - alert: RaftLeaderContactLost
+        expr: keyper_raft_last_contact_seconds > 30
+        for: 1m
+        labels:
+          severity: warning
+          component: raft
+        annotations:
+          summary: "Node {{ $labels.node_id }} lost contact with Raft leader"
+          description: "No contact with leader for {{ $value }} seconds on shard {{ $labels.shard_id }}."
+
+      # Alert when cluster size is below expected
+      - alert: RaftPeerCountLow
+        expr: keyper_raft_peers < 3
+        for: 2m
+        labels:
+          severity: warning
+          component: raft
+        annotations:
+          summary: "Raft peer count below 3 on shard {{ $labels.shard_id }}"
+          description: "Only {{ $value }} peers in cluster, expected 3+. Fault tolerance reduced."
+
+      # Alert on frequent leader changes (cluster instability)
+      - alert: FrequentLeaderChanges
+        expr: rate(keyper_raft_leader_changes_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: raft
+        annotations:
+          summary: "Frequent Raft leader changes detected"
+          description: "Leader changes at {{ $value }}/sec rate. May indicate network or resource issues."
+
+  - name: keyper_http
+    interval: 30s
+    rules:
+      # Alert on high HTTP error rate
+      - alert: HighHTTPErrorRate
+        expr: sum(rate(keyper_http_requests_total{status=~"5.."}[5m])) / sum(rate(keyper_http_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          component: http
+        annotations:
+          summary: "High HTTP 5xx error rate (>5%)"
+          description: "{{ $value | humanizePercentage }} of requests returning 5xx errors."
+          runbook_url: "https://docs.keyper.io/runbooks/high-error-rate"
+
+      # Alert on high HTTP latency
+      - alert: HighHTTPLatency
+        expr: histogram_quantile(0.99, rate(keyper_http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: http
+        annotations:
+          summary: "High HTTP request latency (P99 > 2s)"
+          description: "HTTP P99 latency is {{ $value }}s on {{ $labels.path }}."
+
+      # Alert when too many in-flight requests (possible overload)
+      - alert: HighInFlightRequests
+        expr: max(keyper_http_in_flight_requests) > 100
+        for: 2m
+        labels:
+          severity: warning
+          component: http
+        annotations:
+          summary: "High number of in-flight HTTP requests"
+          description: "{{ $value }} concurrent requests, possible overload or slow responses."
+
+  - name: keyper_storage
+    interval: 60s
+    rules:
+      # Alert when BadgerDB LSM size is growing rapidly
+      - alert: BadgerLSMGrowthHigh
+        expr: rate(keyper_badger_lsm_size_bytes[1h]) > 10485760  # 10MB/hour
+        for: 30m
+        labels:
+          severity: info
+          component: storage
+        annotations:
+          summary: "BadgerDB LSM growing rapidly on shard {{ $labels.shard_id }}"
+          description: "LSM tree growing at {{ $value | humanize }}B/s. Consider compaction."
+
+      # Alert when value log size exceeds threshold
+      - alert: BadgerVLogSizeHigh
+        expr: keyper_badger_vlog_size_bytes > 10737418240  # 10GB
+        for: 10m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "BadgerDB value log size high on shard {{ $labels.shard_id }}"
+          description: "Value log size is {{ $value | humanize }}B, approaching limits."
+
+      # Alert on write failures
+      - alert: BadgerWriteFailures
+        expr: rate(keyper_badger_writes_total{status="error"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "BadgerDB write failures on shard {{ $labels.shard_id }}"
+          description: "Write failures detected at {{ $value }}/sec rate."
+
+  - name: keyper_shards
+    interval: 30s
+    rules:
+      # Alert when shard is in read-only mode
+      - alert: ShardReadOnly
+        expr: keyper_shard_read_only == 1
+        for: 10m
+        labels:
+          severity: warning
+          component: shard
+        annotations:
+          summary: "Shard {{ $labels.shard_id }} in read-only mode"
+          description: "Shard has been read-only for 10+ minutes. Writes will fail."
+          runbook_url: "https://docs.keyper.io/runbooks/shard-read-only"
+
+      # Alert on high shard operation failure rate
+      - alert: ShardOperationFailures
+        expr: sum(rate(keyper_shard_operations_total{status="error"}[5m])) by (shard_id) / sum(rate(keyper_shard_operations_total[5m])) by (shard_id) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          component: shard
+        annotations:
+          summary: "High failure rate on shard {{ $labels.shard_id }}"
+          description: "{{ $value | humanizePercentage }} of operations failing."
+
+      # Alert on migration failures
+      - alert: MigrationFailed
+        expr: increase(keyper_shard_migrations_total{status="failed"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: shard
+        annotations:
+          summary: "Shard migration failed on {{ $labels.shard_id }}"
+          description: "Migration failed. Data may be inconsistent."
+          runbook_url: "https://docs.keyper.io/runbooks/migration-failure"
+
+      # Alert when migration is taking too long
+      - alert: MigrationSlow
+        expr: keyper_shard_migrations_total{status="in_progress"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          component: shard
+        annotations:
+          summary: "Slow shard migration on {{ $labels.shard_id }}"
+          description: "Migration has been running for 30+ minutes."
+
+  - name: keyper_control_plane
+    interval: 60s
+    rules:
+      # Alert when control plane loses track of nodes
+      - alert: ControlPlaneNodeLoss
+        expr: keyper_control_plane_nodes < 3
+        for: 5m
+        labels:
+          severity: warning
+          component: control_plane
+        annotations:
+          summary: "Control plane tracking fewer nodes than expected"
+          description: "Only {{ $value }} nodes registered, expected 3+."
+
+      # Alert when no shards are registered
+      - alert: NoShardsRegistered
+        expr: keyper_control_plane_shards == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: control_plane
+        annotations:
+          summary: "No shards registered in control plane"
+          description: "Control plane has no shard registrations. Cluster may not be functional."
+
+  - name: keyper_health
+    interval: 30s
+    rules:
+      # Alert when node is not ready (using external blackbox exporter)
+      # NOTE: This requires blackbox_exporter to probe /v1/health/ready
+      # - alert: NodeNotReady
+      #   expr: probe_success{job="keyper-health-ready"} == 0
+      #   for: 2m
+      #   labels:
+      #     severity: critical
+      #     component: health
+      #   annotations:
+      #     summary: "Node {{ $labels.instance }} not ready"
+      #     description: "Readiness probe failing for 2+ minutes."
+
+      # Alert on node uptime (restart detection)
+      - alert: NodeRestarted
+        expr: (time() - keyper_start_time) < 300
+        for: 1m
+        labels:
+          severity: info
+          component: system
+        annotations:
+          summary: "Node {{ $labels.node_id }} recently restarted"
+          description: "Node has been up for less than 5 minutes."
+
+# Optional: Recording rules for dashboard performance
+  - name: keyper_recording_rules
+    interval: 15s
+    rules:
+      # Pre-aggregate request rate by path
+      - record: keyper:http_requests:rate1m
+        expr: sum(rate(keyper_http_requests_total[1m])) by (path, status)
+
+      # Pre-aggregate Raft commit latency
+      - record: keyper:raft_commit:p99
+        expr: histogram_quantile(0.99, rate(keyper_raft_commit_duration_seconds_bucket[5m]))
+
+      # Pre-aggregate write throughput
+      - record: keyper:badger_write:bytes_per_sec
+        expr: sum(rate(keyper_badger_bytes_written_total[1m])) by (shard_id)

@@ -2,15 +2,18 @@ package raftnode
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
 
 	raft "github.com/hashicorp/raft"
-	"github.com/hashicorp/raft-boltdb"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/sada-02/keyper/store"
 )
 
@@ -29,6 +32,11 @@ type RaftConfig struct {
 	DataDir  string // base data dir - we will create DataDir/raft
 	Store    *store.BadgerStore
 	JoinAddr string // if non-empty, perform join flow (call via HTTP to leader)
+
+	// TLS configuration for Raft transport
+	TLSCertFile string // Path to TLS cert file
+	TLSKeyFile  string // Path to TLS key file
+	TLSCAFile   string // Path to CA cert for peer verification
 }
 
 // NewNode starts and returns a configured Raft node. If joinAddr is empty,
@@ -60,10 +68,40 @@ func NewNode(cfg *RaftConfig) (*Node, error) {
 	logStore := boltStore
 	stableStore := boltStore
 
-	// Transport
-	transport, err := raft.NewTCPTransport(cfg.RaftAddr, nil, 3, 10*time.Second, os.Stderr)
-	if err != nil {
-		return nil, fmt.Errorf("tcp transport: %w", err)
+	// Transport - with optional TLS
+	var transport raft.Transport
+	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		// Create TLS transport
+		tlsConfig, err := createRaftTLSConfig(cfg.TLSCertFile, cfg.TLSKeyFile, cfg.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("create TLS config: %w", err)
+		}
+
+		// Create TCP listener with TLS
+		ln, err := tls.Listen("tcp", cfg.RaftAddr, tlsConfig)
+		if err != nil {
+			return nil, fmt.Errorf("tls listen: %w", err)
+		}
+
+		// Use custom TLS stream layer
+		streamLayer := &raftTLSStreamLayer{
+			addr:      cfg.RaftAddr,
+			tlsConfig: tlsConfig,
+			listener:  ln,
+		}
+
+		transport = raft.NewNetworkTransportWithLogger(
+			streamLayer,
+			3, // max pool
+			10*time.Second,
+			nil, // logger (use default)
+		)
+	} else {
+		// Standard TCP transport (no TLS)
+		transport, err = raft.NewTCPTransport(cfg.RaftAddr, nil, 3, 10*time.Second, os.Stderr)
+		if err != nil {
+			return nil, fmt.Errorf("tcp transport: %w", err)
+		}
 	}
 
 	// FSM
@@ -158,6 +196,16 @@ func (n *Node) AddVoter(nodeID, addr string, timeout time.Duration) error {
 	return f.Error()
 }
 
+// RemoveServer removes a server from the Raft cluster.
+// This should only be called by the leader.
+func (n *Node) RemoveServer(nodeID string, timeout time.Duration) error {
+	f := n.Raft.RemoveServer(raft.ServerID(nodeID), 0, timeout)
+	if err := f.Error(); err != nil {
+		return fmt.Errorf("remove server %s: %w", nodeID, err)
+	}
+	return nil
+}
+
 // Snapshot reader helper — not used externally
 func readAll(r io.Reader) ([]byte, error) {
 	buf := new(bytes.Buffer)
@@ -166,4 +214,70 @@ func readAll(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// createRaftTLSConfig creates a TLS configuration for Raft transport
+func createRaftTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
+	// Load server certificate and key
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load key pair: %w", err)
+	}
+
+	config := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	// Load CA cert for peer verification if provided
+	if caFile != "" {
+		caCert, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("read CA cert: %w", err)
+		}
+
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+
+		config.ClientCAs = caCertPool
+		config.RootCAs = caCertPool
+		config.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+
+	return config, nil
+}
+
+// raftTLSStreamLayer implements raft.StreamLayer with TLS
+type raftTLSStreamLayer struct {
+	addr      string
+	tlsConfig *tls.Config
+	listener  net.Listener
+}
+
+func (t *raftTLSStreamLayer) Accept() (net.Conn, error) {
+	if t.listener == nil {
+		return nil, fmt.Errorf("listener not initialized")
+	}
+	return t.listener.Accept()
+}
+
+func (t *raftTLSStreamLayer) Close() error {
+	if t.listener != nil {
+		return t.listener.Close()
+	}
+	return nil
+}
+
+func (t *raftTLSStreamLayer) Addr() net.Addr {
+	if t.listener != nil {
+		return t.listener.Addr()
+	}
+	return nil
+}
+
+func (t *raftTLSStreamLayer) Dial(address raft.ServerAddress, timeout time.Duration) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout}
+	return tls.DialWithDialer(dialer, "tcp", string(address), t.tlsConfig)
 }

@@ -13,12 +13,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sada-02/keyper/config"
 	"github.com/sada-02/keyper/httpapi"
+	"github.com/sada-02/keyper/metrics"
 	raftnode "github.com/sada-02/keyper/raft"
-	"github.com/sada-02/keyper/store"
 	"github.com/sada-02/keyper/shard"
 	shardraft "github.com/sada-02/keyper/shardraft"
+	"github.com/sada-02/keyper/store"
 )
 
 func main() {
@@ -40,16 +42,20 @@ func main() {
 	h := httpapi.NewHandler(st, cfg.NodeID)
 	h.ShardMgr = shard.NewManager()
 	h.ShardRafts = make(map[string]*shardraft.ShardRaft)
+	h.ShardCount = cfg.ShardCount // Set shard count so handler knows to use per-shard Raft
 
 	// If Raft enabled, initialize node and attach to handler
 	var rn *raftnode.Node
 	if cfg.EnableRaft {
 		raftCfg := &raftnode.RaftConfig{
-			NodeID:   cfg.NodeID,
-			RaftAddr: cfg.RaftAddr,
-			DataDir:  cfg.DataDir,
-			Store:    st,
-			JoinAddr: cfg.JoinAddr,
+			NodeID:      cfg.NodeID,
+			RaftAddr:    cfg.RaftAddr,
+			DataDir:     cfg.DataDir,
+			Store:       st,
+			JoinAddr:    cfg.JoinAddr,
+			TLSCertFile: cfg.RaftTLSCert,
+			TLSKeyFile:  cfg.RaftTLSKey,
+			TLSCAFile:   cfg.RaftTLSCA,
 		}
 		nnode, err := raftnode.NewNode(raftCfg)
 		if err != nil {
@@ -58,7 +64,11 @@ func main() {
 		rn = nnode
 		h.RaftNode = rn
 
-		fmt.Printf("Started raft node: id=%s raft_addr=%s leader=%s\n", rn.ID, rn.Addr, rn.Leader())
+		tlsStatus := "disabled"
+		if cfg.UseRaftTLS() {
+			tlsStatus = "enabled"
+		}
+		fmt.Printf("Started raft node: id=%s raft_addr=%s leader=%s tls=%s\n", rn.ID, rn.Addr, rn.Leader(), tlsStatus)
 
 		// If join flag provided, attempt auto-join to the cluster leader.
 		if cfg.JoinAddr != "" {
@@ -70,65 +80,100 @@ func main() {
 		}
 	}
 
-	if cfg.ShardCount > 0 {
-		startShards(cfg, h)
+	// Register with control plane if configured
+	if cfg.ControlPlaneAddr != "" {
+		if err := registerWithControlPlane(cfg.ControlPlaneAddr, cfg.NodeID, cfg.HTTPAddr, cfg.RaftAddr, 30*time.Second); err != nil {
+			log.Printf("Warning: failed to register with control plane at %s: %v", cfg.ControlPlaneAddr, err)
+		} else {
+			fmt.Printf("Successfully registered with control plane at %s\n", cfg.ControlPlaneAddr)
+		}
 	}
+
+	var membershipMgr *shard.MembershipManager
+	if cfg.ShardCount > 0 {
+		membershipMgr = startShards(cfg, h)
+	}
+
+	// Initialize metrics
+	reg := metrics.DefaultRegistry()
+	reg.SetStartTime()
 
 	mux := http.NewServeMux()
 	h.Register(mux)
-	// register shard admin endpoints
+	// register shard admin endpoints (includes migration endpoints)
 	h.RegisterShardRoutes(mux)
+
+	// Add Prometheus metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
+
+	// Wrap with metrics middleware
+	var handler http.Handler = httpapi.MetricsMiddleware(mux)
+
+	// Wrap with auth middleware if token is configured
+	if cfg.AuthToken != "" {
+		handler = authMiddleware(cfg.AuthToken, handler)
+		fmt.Printf("Authentication enabled for admin endpoints\n")
+	}
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 
 	// Run server in goroutine
 	go func() {
-		fmt.Printf("HTTP server listening on %s (data-dir=%s node=%s)\n", cfg.HTTPAddr, cfg.DataDir, cfg.NodeID)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		protocol := "HTTP"
+		if cfg.UseTLS() {
+			protocol = "HTTPS"
+		}
+		fmt.Printf("%s server listening on %s (data-dir=%s node=%s)\n", protocol, cfg.HTTPAddr, cfg.DataDir, cfg.NodeID)
+
+		var err error
+		if cfg.UseTLS() {
+			err = srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
+		} else {
+			err = srv.ListenAndServe()
+		}
+
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http serve: %v", err)
 		}
 	}()
 
-	// Graceful shutdown on SIGINT/SIGTERM
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
-	fmt.Println("\nshutting down...")
+	// Graceful shutdown handler
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	<-sigCh
 
+	fmt.Println("\nShutting down gracefully...")
+
+	// Stop membership manager
+	if membershipMgr != nil {
+		membershipMgr.Stop()
+	}
+
+	// Shutdown HTTP server
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("server shutdown: %v", err)
+		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
-	// Shutdown raft if needed
-	if rn != nil && rn.Raft != nil {
-		f := rn.Raft.Shutdown()
-		_ = f.Error()
+	// Close Raft
+	if rn != nil {
+		if err := rn.Raft.Shutdown().Error(); err != nil {
+			log.Printf("Raft shutdown error: %v", err)
+		}
 	}
 
-	// Shutdown per-shard raft instances (if any)
-	if h.ShardRafts != nil {
-		for id, sr := range h.ShardRafts {
-			if sr == nil {
-				continue
-			}
- 			// shut down raft instance
- 			if sr.Node != nil && sr.Node.Raft != nil {
- 				_ = sr.Node.Raft.Shutdown()
- 			}
- 			// close per-shard store
- 			if sr.Store != nil {
- 				_ = sr.Store.Close()
- 			}
- 			fmt.Printf("shard %s shut down\n", id)
- 		}
- 	}
+	// Close store
+	if err := st.Close(); err != nil {
+		log.Printf("Store close error: %v", err)
+	}
+
+	fmt.Println("Shutdown complete")
 }
 
 // joinLeader tries to POST to leaderAddr + "/v1/join" the JSON
@@ -205,4 +250,92 @@ func joinLeader(leaderHTTP string, nodeID string, raftAddr string, timeout time.
 	}
 
 	return fmt.Errorf("join timed out after %s", timeout.String())
+}
+
+// registerWithControlPlane registers this node with the control plane
+func registerWithControlPlane(controlPlaneAddr, nodeID, httpAddr, raftAddr string, timeout time.Duration) error {
+	type nodeReg struct {
+		NodeID   string `json:"node_id"`
+		HTTPAddr string `json:"http_addr"`
+		RaftAddr string `json:"raft_addr"`
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	reqBody := nodeReg{
+		NodeID:   nodeID,
+		HTTPAddr: httpAddr,
+		RaftAddr: raftAddr,
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	deadline := time.Now().Add(timeout)
+	try := 0
+
+	for time.Now().Before(deadline) {
+		try++
+		url := fmt.Sprintf("http://%s/v1/control/nodes", controlPlaneAddr)
+		req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Printf("[control-reg] attempt %d: error contacting %s: %v\n", try, controlPlaneAddr, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		_ = resp.Body.Close()
+
+		if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+			return nil
+		}
+
+		fmt.Printf("[control-reg] attempt %d: unexpected status %d from %s\n", try, resp.StatusCode, controlPlaneAddr)
+		time.Sleep(1 * time.Second)
+	}
+
+	return fmt.Errorf("control plane registration timed out after %s", timeout.String())
+}
+
+// authMiddleware wraps an HTTP handler to require Bearer token authentication
+// for admin endpoints (join, shard operations, migration, etc.)
+func authMiddleware(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// List of admin endpoints that require authentication
+		adminEndpoints := []string{
+			"/v1/join",
+			"/v1/shards/",
+			"/v1/control/",
+		}
+
+		// Check if this is an admin endpoint
+		requiresAuth := false
+		for _, prefix := range adminEndpoints {
+			if len(r.URL.Path) >= len(prefix) && r.URL.Path[:len(prefix)] == prefix {
+				requiresAuth = true
+				break
+			}
+		}
+
+		// Allow public endpoints without auth
+		if !requiresAuth {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check Authorization header
+		authHeader := r.Header.Get("Authorization")
+		expectedAuth := "Bearer " + token
+
+		if authHeader != expectedAuth {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Authentication successful
+		next.ServeHTTP(w, r)
+	})
 }

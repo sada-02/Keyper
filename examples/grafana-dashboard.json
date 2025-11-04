@@ -1,0 +1,287 @@
+{
+  "dashboard": {
+    "title": "Keyper Observability",
+    "tags": ["keyper", "distributed-kv", "raft"],
+    "timezone": "browser",
+    "editable": true,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s",
+    
+    "panels": [
+      {
+        "id": 1,
+        "title": "Cluster Overview",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "keyper_control_plane_nodes",
+            "legendFormat": "Nodes"
+          },
+          {
+            "expr": "keyper_control_plane_shards",
+            "legendFormat": "Shards"
+          }
+        ]
+      },
+      
+      {
+        "id": 2,
+        "title": "Raft Leaders",
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "count(keyper_raft_state == 2)",
+            "legendFormat": "Leaders"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      
+      {
+        "id": 3,
+        "title": "HTTP Request Rate",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(keyper_http_requests_total[1m])) by (status)",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "yaxes": [
+          {"format": "reqps", "label": "Requests/sec"},
+          {"show": false}
+        ]
+      },
+      
+      {
+        "id": 4,
+        "title": "HTTP Latency (P99)",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 4, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(keyper_http_request_duration_seconds_bucket[5m])) by (path, le))",
+            "legendFormat": "{{path}}"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Latency"},
+          {"show": false}
+        ]
+      },
+      
+      {
+        "id": 5,
+        "title": "Raft Commit Latency",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 10, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(keyper_raft_commit_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(keyper_raft_commit_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(keyper_raft_commit_duration_seconds_bucket[5m]))",
+            "legendFormat": "P99"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Commit Latency"},
+          {"show": false}
+        ]
+      },
+      
+      {
+        "id": 6,
+        "title": "Raft Operations",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 10, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(keyper_raft_applied_ops_total[1m])) by (op_type)",
+            "legendFormat": "{{op_type}}"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Operations/sec"},
+          {"show": false}
+        ]
+      },
+      
+      {
+        "id": 7,
+        "title": "BadgerDB Write Throughput",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(keyper_badger_bytes_written_total[1m])) by (shard_id)",
+            "legendFormat": "Shard {{shard_id}}"
+          }
+        ],
+        "yaxes": [
+          {"format": "Bps", "label": "Write Throughput"},
+          {"show": false}
+        ]
+      },
+      
+      {
+        "id": 8,
+        "title": "BadgerDB Storage Size",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "keyper_badger_lsm_size_bytes",
+            "legendFormat": "LSM - Shard {{shard_id}}"
+          },
+          {
+            "expr": "keyper_badger_vlog_size_bytes",
+            "legendFormat": "VLog - Shard {{shard_id}}"
+          }
+        ],
+        "yaxes": [
+          {"format": "bytes", "label": "Storage Size"},
+          {"show": false}
+        ]
+      },
+      
+      {
+        "id": 9,
+        "title": "Shard Operations",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 22, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(keyper_shard_operations_total[1m])) by (shard_id, operation)",
+            "legendFormat": "{{shard_id}} - {{operation}}"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Operations/sec"},
+          {"show": false}
+        ]
+      },
+      
+      {
+        "id": 10,
+        "title": "Shard Migrations",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 22, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(keyper_shard_migrations_total[5m])) by (status)",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Migrations/sec"},
+          {"show": false}
+        ]
+      },
+      
+      {
+        "id": 11,
+        "title": "Raft State by Shard",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 28, "w": 24, "h": 4},
+        "targets": [
+          {
+            "expr": "keyper_raft_state",
+            "legendFormat": "Shard {{shard_id}} - Node {{node_id}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"value": 0, "text": "Follower", "color": "blue"},
+              {"value": 1, "text": "Candidate", "color": "yellow"},
+              {"value": 2, "text": "Leader", "color": "green"}
+            ]
+          }
+        }
+      },
+      
+      {
+        "id": 12,
+        "title": "Shard Read-Only Status",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 32, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "keyper_shard_read_only",
+            "legendFormat": "Shard {{shard_id}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "red"}
+              ]
+            },
+            "mappings": [
+              {"value": 0, "text": "Writable"},
+              {"value": 1, "text": "Read-Only"}
+            ]
+          }
+        }
+      },
+      
+      {
+        "id": 13,
+        "title": "Node Uptime",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 32, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "time() - keyper_start_time",
+            "legendFormat": "Node {{node_id}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      }
+    ],
+    
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus",
+          "current": {
+            "text": "Prometheus",
+            "value": "Prometheus"
+          }
+        }
+      ]
+    }
+  }
+}
