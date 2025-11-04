@@ -109,28 +109,35 @@ func (h *Handler) keyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodGet:
-		// Linearizable read:
+		// Check for stale-read query parameter (allows reads from followers)
+		allowStale := r.URL.Query().Get("stale") == "true"
+
 		if h.RaftNode != nil {
-			// If follower -> redirect client to leader
-			if h.RaftNode.Raft.State() != raft.Leader {
+			// If follower and client wants linearizable read -> redirect to leader
+			if h.RaftNode.Raft.State() != raft.Leader && !allowStale {
 				leader := h.RaftNode.Leader()
 				if leader != "" {
 					w.Header().Set("X-Raft-Leader", leader)
 				}
 				// ask client to retry at leader (307 Temporary Redirect)
-				http.Error(w, "not leader — read must go to leader", http.StatusTemporaryRedirect)
+				http.Error(w, "not leader — read must go to leader (or use ?stale=true)", http.StatusTemporaryRedirect)
 				return
 			}
 
-			// We are leader: issue a Barrier so that all preceding commits are applied
-			// before serving the read. Barrier returns a Future.
-			barrierFut := h.RaftNode.Raft.Barrier(5 * time.Second)
-			if err := barrierFut.Error(); err != nil {
-				http.Error(w, "raft barrier failed: "+err.Error(), http.StatusInternalServerError)
-				return
+			// Linearizable read (leader only): use Barrier
+			if h.RaftNode.Raft.State() == raft.Leader {
+				barrierFut := h.RaftNode.Raft.Barrier(5 * time.Second)
+				if err := barrierFut.Error(); err != nil {
+					http.Error(w, "raft barrier failed: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else {
+				// Stale read from follower - warn client
+				w.Header().Set("X-Raft-Stale-Read", "true")
+				w.Header().Set("X-Raft-Leader", h.RaftNode.Leader())
 			}
 
-			// Now safe to read from local store (linearizable)
+			// Read from local store
 			val, err := h.Store.Get([]byte(key))
 			if err != nil {
 				if errors.Is(err, store.ErrNotFound) {
