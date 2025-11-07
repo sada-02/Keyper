@@ -18,10 +18,17 @@ func main() {
 	cfg := config.Load()
 
 	ctrlCfg := &control.ControlConfig{
-		NodeID:       cfg.NodeID + "-control",
-		RaftAddr:     cfg.RaftAddr, // pass explicit raft-addr flag when starting control
-		DataDir:      cfg.DataDir + "/control",
-		JoinAddr:     cfg.JoinAddr,
+		NodeID:   cfg.NodeID + "-control",
+		RaftAddr: cfg.RaftAddr, // pass explicit raft-addr flag when starting control
+		DataDir:  cfg.DataDir + "/control",
+		// If user requested explicit bootstrap, ensure JoinAddr is empty so
+		// raft.NewNode will attempt single-node bootstrap when no state exists.
+		JoinAddr: func() string {
+			if cfg.Bootstrap {
+				return ""
+			}
+			return cfg.JoinAddr
+		}(),
 		ApplyTimeout: 5 * time.Second,
 		TLSCertFile:  cfg.RaftTLSCert,
 		TLSKeyFile:   cfg.RaftTLSKey,

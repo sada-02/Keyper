@@ -91,6 +91,11 @@ func (m *MembershipManager) Stop() {
 	log.Println("[MembershipMgr] Stopped membership reconciliation")
 }
 
+// ReconcileNow triggers an immediate reconciliation without waiting for the next tick
+func (m *MembershipManager) ReconcileNow() {
+	m.reconcileAllShards()
+}
+
 // reconciliationLoop periodically syncs membership with control plane
 func (m *MembershipManager) reconciliationLoop() {
 	ticker := time.NewTicker(m.pollInterval)

@@ -28,6 +28,9 @@ type Config struct {
 	RaftTLSKey  string // Path to TLS key for Raft transport
 	RaftTLSCA   string // Path to CA cert for verifying Raft peers
 	AuthToken   string // Bearer token for admin endpoints (optional)
+
+	// For bootstrapping clusters (control plane or shard nodes)
+	Bootstrap bool
 }
 
 // Load parses command-line flags into Config.
@@ -54,6 +57,9 @@ func Load() *Config {
 	flag.StringVar(&c.RaftTLSKey, "raft-tls-key", "", "Path to TLS private key for Raft transport")
 	flag.StringVar(&c.RaftTLSCA, "raft-tls-ca", "", "Path to CA certificate for verifying Raft peers")
 	flag.StringVar(&c.AuthToken, "auth-token", "", "Bearer token for authenticating admin endpoints (optional)")
+
+	// Allow an explicit --bootstrap flag so scripts can request single-node bootstrap.
+	flag.BoolVar(&c.Bootstrap, "bootstrap", false, "bootstrap a single-node Raft cluster (useful for first node)")
 
 	flag.Parse()
 	return c

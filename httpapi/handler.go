@@ -212,7 +212,20 @@ func (h *Handler) statusHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get key count from store
 	keyCount := 0
-	if h.Store != nil {
+
+	// If sharded mode is enabled, count keys from shard stores
+	if h.ShardCount > 0 && h.ShardRafts != nil {
+		for _, sr := range h.ShardRafts {
+			if sr != nil && sr.Store != nil {
+				it := sr.Store.NewIterator()
+				for it.Rewind(); it.Valid(); it.Next() {
+					keyCount++
+				}
+				it.Close()
+			}
+		}
+	} else if h.Store != nil {
+		// Legacy mode: count from main store
 		it := h.Store.NewIterator()
 		defer it.Close()
 		for it.Rewind(); it.Valid(); it.Next() {
