@@ -99,7 +99,7 @@ test_basic_port_reuse() {
         
         # Verify port is free
         local port_free=true
-        if netstat -tuln 2>/dev/null | grep -q ":$BASE_HTTP_PORT "; then
+        if ss -tuln 2>/dev/null | grep -q ":$BASE_HTTP_PORT "; then
             port_free=false
         fi
         
@@ -246,7 +246,7 @@ test_port_cleanup_after_crash() {
     
     # Verify server is running and port is bound
     local initially_bound=false
-    if netstat -tuln 2>/dev/null | grep -q ":$((BASE_HTTP_PORT + 3)) "; then
+    if ss -tuln 2>/dev/null | grep -q ":$((BASE_HTTP_PORT + 3)) "; then
         initially_bound=true
     fi
     
@@ -258,7 +258,7 @@ test_port_cleanup_after_crash() {
     
     # Check if port is released
     local port_released=true
-    if netstat -tuln 2>/dev/null | grep -q ":$((BASE_HTTP_PORT + 3)) "; then
+    if ss -tuln 2>/dev/null | grep -q ":$((BASE_HTTP_PORT + 3)) "; then
         port_released=false
     fi
     

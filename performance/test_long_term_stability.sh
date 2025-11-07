@@ -88,14 +88,23 @@ get_process_stats() {
     fi
     
     # Get memory (RSS in KB) and CPU percentage
-    local stats=$(ps -o rss=,pcpu= -p $pid 2>/dev/null | tr -d ' ')
+    local stats=$(ps -o rss=,pcpu= -p $pid 2>/dev/null | tr -s ' ' | sed 's/^ //')
     if [ -z "$stats" ]; then
         echo "0 0"
         return
     fi
     
-    local memory_kb=$(echo $stats | cut -d' ' -f1)
-    local cpu_percent=$(echo $stats | cut -d' ' -f2)
+    local memory_kb=$(echo "$stats" | cut -d' ' -f1)
+    local cpu_percent=$(echo "$stats" | cut -d' ' -f2)
+    
+    # Validate we have values
+    if [ -z "$memory_kb" ]; then
+        memory_kb=0
+    fi
+    if [ -z "$cpu_percent" ] || [ "$cpu_percent" = "" ]; then
+        cpu_percent=0
+    fi
+    
     local memory_mb=$((memory_kb / 1024))
     
     echo "$memory_mb $cpu_percent"
@@ -314,9 +323,9 @@ test_cluster_stability() {
         local join_flag=""
         
         if [ $i -eq 1 ]; then
-            bootstrap_flag=""
+            bootstrap_flag="--enable-raft"
         else
-            join_flag="--enable-raft --join=http://127.0.0.1:$BASE_RAFT_PORT"
+            join_flag="--enable-raft --join=http://127.0.0.1:$BASE_HTTP_PORT"
         fi
         
         ../bin/server \

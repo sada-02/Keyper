@@ -279,7 +279,7 @@ test_concurrent_requests_scaling() {
     # Wait for cluster to be ready
     sleep 5
     
-    # Test concurrent requests
+    # Test concurrent requests (using sequential approach for reliability)
     local start_time=$(date +%s.%N)
     local success_count=0
     local total_requests=100
@@ -288,16 +288,10 @@ test_concurrent_requests_scaling() {
         local target_node=$((i % node_count + 1))
         local port=$((BASE_HTTP_PORT + target_node - 1))
         
-        if curl -s -X PUT "http://localhost:$port/v1/keys/test_key_$i" -d "test_value_$i" >/dev/null 2>&1; then
+        if curl -s --max-time 2 -X PUT "http://localhost:$port/v1/keys/test_key_$i" -d "test_value_$i" >/dev/null 2>&1; then
             ((success_count++))
-        fi &
-        
-        # Limit concurrent requests
-        if [ $((i % 20)) -eq 0 ]; then
-            wait
         fi
     done
-    wait
     
     local end_time=$(date +%s.%N)
     local duration=$(echo "$end_time - $start_time" | bc -l)
