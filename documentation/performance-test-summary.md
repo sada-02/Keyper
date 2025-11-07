@@ -1,14 +1,14 @@
 # Keyper Performance Test Summary
 
 **Date**: November 8, 2025  
-**Test Suite Version**: 1.0  
-**Overall Pass Rate**: 100% (31/31 tests)
+**Test Suite Version**: 1.1  
+**Overall Pass Rate**: To be determined after running new tests
 
 ---
 
 ## Executive Summary
 
-All performance tests have been successfully executed and passed with a 100% success rate. The Keyper distributed key-value store demonstrates excellent performance characteristics across all tested dimensions including startup time, memory efficiency, port management, request throughput, cluster scalability, and long-term stability.
+The Keyper distributed key-value store performance test suite has been expanded to include comprehensive testing for shard migration and Prometheus metrics collection. The test suite now covers all critical aspects of the system including startup performance, memory efficiency, request throughput, cluster scalability, long-term stability, port management, **shard migration capabilities**, and **metrics collection**.
 
 ### Key Highlights
 
@@ -18,6 +18,8 @@ All performance tests have been successfully executed and passed with a 100% suc
 - ✅ **Cluster Scalability**: Successfully tested up to 9-node clusters
 - ✅ **Long-term Stability**: 5-minute stability tests with 100% success
 - ✅ **Port Management**: Clean port reuse with 100% reliability
+- 🆕 **Shard Migration**: Export/import, pause/resume, zero-downtime migration
+- 🆕 **Metrics Collection**: Prometheus endpoint with HTTP, Raft, BadgerDB, and shard metrics
 
 ---
 
@@ -493,6 +495,197 @@ fi
 
 ---
 
+---
+
+### 7. Shard Migration Test
+
+**Status**: 🆕 NEW TEST - Ready for execution  
+**Script**: `test_migration.sh`  
+**Duration**: ~5-8 minutes (estimated)
+
+#### Test Overview
+
+Comprehensive testing of shard migration capabilities including data export/import, pause/resume operations, and complete migration workflows. These tests validate zero-downtime migration scenarios and data integrity during shard transitions.
+
+#### Test Cases
+
+| Test Case | Description | Expected Outcome |
+|-----------|-------------|------------------|
+| Shard data export and import | Tests export from source node and import to destination | 100% data integrity |
+| Shard pause and resume | Tests write pause during migration and resume after | Writes blocked when paused, work after resume |
+| Complete migration workflow | Full 2-node migration with data verification | All data migrated successfully |
+| Zero-downtime migration | Migration while writes continue | >70% write availability maintained |
+| Large dataset migration | Migration of 500 keys with performance metrics | Efficient transfer with timing data |
+
+#### Key Features Tested
+
+✅ **Export/Import Operations**
+- Gzipped data export to minimize transfer size
+- Binary data import with integrity verification
+- Export/import timing and throughput metrics
+
+✅ **Pause/Resume Operations**  
+- Read-only mode during migration
+- Write blocking when paused
+- Automatic resume after migration
+
+✅ **Migration Workflow**
+- Complete source-to-destination migration
+- Data verification at each phase
+- New write capability after migration
+
+✅ **Zero-Downtime Design**
+- Continuous write capability during export
+- Minimal service interruption
+- High availability maintenance
+
+✅ **Performance Metrics**
+- Export/import duration tracking
+- Data transfer size measurement
+- Throughput calculation
+- Large dataset handling (500+ keys)
+
+#### Expected Results
+
+**Export Performance**:
+- Export time: <5 seconds for 100 keys
+- Compression ratio: ~30-50% size reduction
+- No data loss during export
+
+**Import Performance**:
+- Import time: <5 seconds for 100 keys
+- 100% data integrity verification
+- Immediate read capability after import
+
+**Zero-Downtime Migration**:
+- Write availability: >70% during migration
+- Data consistency: 100% after migration
+- Service continuity maintained
+
+**Large Dataset**:
+- 500 keys migrated in <30 seconds
+- Linear scaling of export/import time
+- Memory-efficient streaming
+
+#### Integration with Migration Coordinator
+
+The tests validate the functionality used by `migrate.Coordinator` which orchestrates production migrations with the following phases:
+
+1. **Phase 1**: Pause writes on source shard
+2. **Phase 2**: Export data snapshot from source
+3. **Phase 3**: Import data to destination(s)
+4. **Phase 4**: Add destination nodes to Raft cluster
+5. **Phase 5**: Wait for replication to stabilize
+6. **Phase 6**: Remove source node from Raft
+7. **Phase 7**: Update control plane metadata
+8. **Phase 8**: Resume writes on destination
+
+---
+
+### 8. Prometheus Metrics Test
+
+**Status**: 🆕 NEW TEST - Ready for execution  
+**Script**: `test_metrics.sh`  
+**Duration**: ~4-6 minutes (estimated)
+
+#### Test Overview
+
+Validates Prometheus metrics collection, endpoint availability, accuracy, and performance impact. Tests ensure proper instrumentation of HTTP requests, Raft consensus, BadgerDB storage, and shard operations for production monitoring.
+
+#### Test Cases
+
+| Test Case | Description | Expected Outcome |
+|-----------|-------------|------------------|
+| Metrics endpoint availability | Tests /metrics endpoint accessibility | Prometheus-format response with >10 lines |
+| HTTP request metrics | Validates HTTP request counters and duration | Metrics increment with each request |
+| Raft consensus metrics | Tests Raft-specific instrumentation | Applied ops, state, peers, commit metrics |
+| BadgerDB storage metrics | Validates storage metrics collection | Reads, writes, bytes, LSM/VLog size |
+| Shard operation metrics | Tests shard-level metrics | Operation counters for get/set/delete |
+| System-level metrics | Validates Go runtime and process metrics | Goroutines, memory stats, uptime |
+| Metrics accuracy | Verifies counter accuracy with known requests | Exact match or tolerance of 10% |
+| Metrics performance | Measures metrics collection overhead | <500ms endpoint response time |
+
+#### Metrics Categories Tested
+
+✅ **HTTP API Metrics**
+- `keyper_http_requests_total{method, path, status}` - Request counters
+- `keyper_http_request_duration_seconds{method, path}` - Latency histogram
+- `keyper_http_in_flight_requests{method, path}` - Concurrent requests
+
+✅ **Raft Consensus Metrics**
+- `keyper_raft_leader_changes_total` - Leader election events
+- `keyper_raft_commit_duration_seconds` - Commit latency
+- `keyper_raft_applied_ops_total{shard_id, op_type}` - Applied operations
+- `keyper_raft_state{shard_id, node_id}` - Current Raft state
+- `keyper_raft_peers{shard_id}` - Cluster size
+- `keyper_raft_last_contact_seconds{shard_id}` - Leader contact time
+
+✅ **BadgerDB Storage Metrics**
+- `keyper_badger_reads_total{shard_id}` - Read operations
+- `keyper_badger_writes_total{shard_id}` - Write operations
+- `keyper_badger_bytes_read_total{shard_id}` - Bytes read
+- `keyper_badger_bytes_written_total{shard_id}` - Bytes written
+- `keyper_badger_lsm_size_bytes{shard_id}` - LSM tree size
+- `keyper_badger_vlog_size_bytes{shard_id}` - Value log size
+
+✅ **Shard Operation Metrics**
+- `keyper_shard_operations_total{shard_id, operation}` - Shard ops
+- `keyper_shard_migrations_total{shard_id, status}` - Migration events
+- `keyper_shard_read_only{shard_id}` - Read-only status
+- `keyper_shard_keys{shard_id}` - Key count estimate
+
+✅ **System Metrics**
+- `keyper_start_time_seconds` - Server start timestamp
+- `keyper_control_plane_nodes` - Registered nodes
+- `keyper_control_plane_shards` - Tracked shards
+- Standard Go runtime metrics (goroutines, memory, GC)
+
+#### Expected Results
+
+**Endpoint Availability**:
+- `/metrics` endpoint responds with HTTP 200
+- Valid Prometheus text format
+- Response contains >10 metric lines
+
+**Metric Accuracy**:
+- Request counters increment correctly
+- Duration histograms capture latency
+- State gauges reflect current status
+
+**Performance Impact**:
+- Metrics endpoint response: <500ms
+- No significant throughput degradation
+- Minimal memory overhead
+
+**Coverage**:
+- All metric categories present
+- Labels correctly applied
+- Values within expected ranges
+
+#### Integration with Prometheus
+
+The metrics endpoint is designed for Prometheus scraping with the following configuration:
+
+```yaml
+scrape_configs:
+  - job_name: 'keyper'
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 'localhost:8080'  # Node 1
+          - 'localhost:8081'  # Node 2
+          - 'localhost:8082'  # Node 3
+```
+
+Metrics enable monitoring dashboards in Grafana for:
+- Request rate and latency tracking
+- Raft cluster health monitoring
+- Storage utilization trends
+- Migration operation tracking
+- Anomaly detection and alerting
+
+---
+
 ## Test Coverage Summary
 
 ### ✅ Covered Areas
@@ -507,23 +700,34 @@ fi
 - ✅ Long-term stability (5 minutes)
 - ✅ Memory leak detection
 - ✅ Data persistence across restarts
+- 🆕 **Shard data export/import**
+- 🆕 **Shard pause/resume operations**
+- 🆕 **Zero-downtime migration**
+- 🆕 **Large dataset migration (500+ keys)**
+- 🆕 **Prometheus metrics endpoint**
+- 🆕 **HTTP request metrics**
+- 🆕 **Raft consensus metrics**
+- 🆕 **BadgerDB storage metrics**
+- 🆕 **Shard operation metrics**
+- 🆕 **Metrics accuracy validation**
+- 🆕 **Metrics performance impact**
 
 ### 🔄 Areas for Future Enhancement
 - Multi-cluster performance evaluation
-- Raft consensus-specific performance testing
-- BadgerDB storage performance analysis
 - Advanced cluster resilience testing (network partitions)
-- Shard migration performance testing
 - 24-hour stability testing
 - Performance under different load patterns
-- Benchmarking against other KV stores
+- Benchmarking against other KV stores (Redis, etcd)
+- Raft snapshot performance testing
+- BadgerDB compaction performance analysis
 
 ---
 
 ## Conclusion
 
-The Keyper distributed key-value store has successfully passed all comprehensive performance tests with a **100% pass rate (31/31 tests)**. The system demonstrates:
+The Keyper distributed key-value store has an expanded comprehensive performance test suite covering all critical aspects of production operation. The test suite now includes **shard migration** and **Prometheus metrics collection** testing in addition to the previously validated areas.
 
+**Previously Validated (100% pass rate):**
 ✅ **Excellent startup performance** - Sub-second initialization  
 ✅ **Outstanding memory efficiency** - 17-20MB per node  
 ✅ **Strong request throughput** - 95-272 req/sec  
@@ -532,19 +736,58 @@ The Keyper distributed key-value store has successfully passed all comprehensive
 ✅ **Perfect data persistence** - No data loss across restarts  
 ✅ **Proper failure handling** - Graceful recovery from node failures
 
-The system is **production-ready** for deployment as a lightweight, efficient distributed key-value store. All identified issues during testing have been resolved, and the test suite is now fully functional for continuous integration.
+**New Test Coverage:**
+🆕 **Shard Migration** - Export/import, pause/resume, zero-downtime migration  
+🆕 **Metrics Collection** - Prometheus endpoint with comprehensive instrumentation
+
+The original test suite is **production-ready** with all 31 tests passing. The new migration and metrics tests are **ready for execution** and will validate critical features for production operations including live data migration and observability.
 
 ### Recommended Next Steps
 
-1. ✅ All comprehensive tests passing - ready for integration
-2. 🔄 Investigate cross-node replication behavior in quick test
-3. 🔄 Extend stability testing to 1-hour or 24-hour runs
-4. 🔄 Benchmark against Redis/etcd for comparative analysis
-5. 🔄 Add network partition resilience testing
-6. 🔄 Performance testing with production-scale datasets
+1. ✅ Core performance tests passing - ready for integration
+2. 🆕 **Run migration tests** - Execute `./test_migration.sh` to validate shard migration
+3. 🆕 **Run metrics tests** - Execute `./test_metrics.sh` to validate Prometheus integration
+4. 🔄 Extend stability testing to 1-hour or 24-hour runs
+5. 🔄 Set up Grafana dashboards for metrics visualization
+6. 🔄 Benchmark against Redis/etcd for comparative analysis
+7. 🔄 Add network partition resilience testing
+8. 🔄 Performance testing with production-scale datasets
+
+### Quick Start for New Tests
+
+```bash
+# Navigate to performance directory
+cd performance
+
+# Run migration tests
+./test_migration.sh
+
+# Run metrics tests  
+./test_metrics.sh
+
+# Run all tests (including new ones)
+./run_all_performance_tests.sh
+```
+
+### Monitoring Integration
+
+Once metrics tests pass, integrate with Prometheus:
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'keyper'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:8080', 'localhost:8081', 'localhost:8082']
+```
+
+Access metrics at: `http://localhost:8080/metrics`
+
+Use the provided `examples/grafana-dashboard.json` for visualization.
 
 ---
 
 **Test Suite Maintained By**: Keyper Development Team  
 **Last Updated**: November 8, 2025  
-**Status**: All tests passing ✅
+**Status**: Core tests passing ✅ | New tests ready for execution 🆕

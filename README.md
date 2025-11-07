@@ -107,6 +107,32 @@ This will start a 3-node Raft cluster with:
 # Or manually: pkill -f "bin/server"
 ```
 
+### 🧪 Performance Testing
+
+Keyper includes comprehensive performance tests:
+
+```bash
+# Run migration tests
+./performance/test_migration.sh
+
+# Run metrics tests
+./performance/test_metrics.sh
+
+# Or from performance directory
+cd performance
+./test_migration.sh
+./test_metrics.sh
+```
+
+**Available Tests:**
+- **Migration Tests**: Export/import, pause/resume, zero-downtime migration
+- **Metrics Tests**: Prometheus endpoint, HTTP/Raft/BadgerDB metrics
+- **Throughput Tests**: Request processing performance
+- **Scalability Tests**: Cluster scaling (1-10 nodes)
+- **Stability Tests**: Long-term operation validation
+
+See `performance/README.md` for detailed documentation.
+
 ### 🌐 Interactive Web Demo (Recommended for Testing)
 
 For an interactive visualization and testing experience:

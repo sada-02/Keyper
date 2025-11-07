@@ -21,6 +21,8 @@ The performance tests are designed to evaluate different aspects of the Keyper s
 - `test_request_throughput.sh` - HTTP request performance (sequential/concurrent, latency)
 - `test_long_term_stability.sh` - Extended runtime testing (5min stability, data persistence)
 - `test_port_reuse.sh` - Port management testing (reuse capability, cleanup after crashes)
+- `test_migration.sh` - Shard migration testing (export/import, pause/resume, zero-downtime)
+- `test_metrics.sh` - Prometheus metrics testing (endpoint availability, accuracy, performance)
 
 ### 2. Execution Scripts
 - `run_all_performance_tests.sh` - Master test runner (executes all tests, generates reports)
@@ -40,6 +42,8 @@ The performance test suite covers:
 - **Request Throughput**: Sequential/concurrent requests, mixed workloads, latency
 - **Long-term Stability**: Extended runtime, memory monitoring, data persistence  
 - **Port Management**: Reuse capability, rapid restarts, cleanup verification
+- **Shard Migration**: Export/import, pause/resume, zero-downtime migration, large datasets
+- **Metrics Collection**: Prometheus endpoint, HTTP/Raft/BadgerDB metrics, accuracy validation
 
 ### ✅ **Recent Fixes Applied (November 2025)**
 - **✅ Concurrency Issues**: Fixed concurrent startup test parameters and cluster formation
@@ -62,10 +66,7 @@ The performance test suite covers:
 
 ### 🔄 **Future Enhancements** (Not Yet Implemented)
 - Multi-cluster performance evaluation
-- Raft consensus-specific performance testing
-- BadgerDB storage performance analysis  
 - Advanced cluster resilience testing
-- Shard migration performance testing
 
 ## Usage
 
@@ -90,6 +91,8 @@ cd /path/to/keyper/performance
 ./test_request_throughput.sh    # Throughput measurement
 ./test_long_term_stability.sh   # Stability validation
 ./test_port_reuse.sh            # Port management
+./test_migration.sh             # Shard migration testing
+./test_metrics.sh               # Metrics collection testing
 ```
 
 ## Prerequisites
