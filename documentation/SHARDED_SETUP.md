@@ -35,6 +35,7 @@ Make sure you have:
 - Built binaries: `./bin/server` and `./bin/control`
 - Ports available: 7000-7001 (control), 8080-8083 (HTTP), 11000-11003 (main Raft), 12000-12001 (shard Raft)
 - `jq` installed for JSON formatting: `sudo apt install jq`
+- run `./scripts/kill.sh` to ensure that the required ports are freed 
 
 ---
 

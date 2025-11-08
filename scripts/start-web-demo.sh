@@ -38,7 +38,7 @@ echo -e "${GREEN}Starting Cluster 0 - Node 1 (localhost:8080, Shard 0)...${NC}"
   --raft-addr=127.0.0.1:9080 \
   --data-dir=./cluster0-node1-data \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="0" \
   --raft-base-port=12000 \
   > logs/cluster0-node1.log 2>&1 &
@@ -55,7 +55,7 @@ echo -e "${GREEN}Starting Cluster 0 - Node 2 (localhost:8081, Shard 0)...${NC}"
   --data-dir=./cluster0-node2-data \
   --join=http://localhost:8080 \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="0" \
   --raft-base-port=12000 \
   > logs/cluster0-node2.log 2>&1 &
@@ -72,7 +72,7 @@ echo -e "${GREEN}Starting Cluster 0 - Node 3 (localhost:8082, Shard 0)...${NC}"
   --data-dir=./cluster0-node3-data \
   --join=http://localhost:8080 \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="0" \
   --raft-base-port=12000 \
   > logs/cluster0-node3.log 2>&1 &
@@ -89,7 +89,7 @@ echo -e "${GREEN}Starting Cluster 1 - Node 4 (localhost:8083, Shard 1)...${NC}"
   --raft-addr=127.0.0.1:9083 \
   --data-dir=./cluster1-node4-data \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="1" \
   --raft-base-port=12000 \
   > logs/cluster1-node4.log 2>&1 &
@@ -106,7 +106,7 @@ echo -e "${GREEN}Starting Cluster 1 - Node 5 (localhost:8084, Shard 1)...${NC}"
   --data-dir=./cluster1-node5-data \
   --join=http://localhost:8083 \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="1" \
   --raft-base-port=12000 \
   > logs/cluster1-node5.log 2>&1 &
@@ -123,7 +123,7 @@ echo -e "${GREEN}Starting Cluster 1 - Node 6 (localhost:8085, Shard 1)...${NC}"
   --data-dir=./cluster1-node6-data \
   --join=http://localhost:8083 \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="1" \
   --raft-base-port=12000 \
   > logs/cluster1-node6.log 2>&1 &
@@ -140,7 +140,7 @@ echo -e "${GREEN}Starting Cluster 2 - Node 7 (localhost:8086, Shard 2)...${NC}"
   --raft-addr=127.0.0.1:9086 \
   --data-dir=./cluster2-node7-data \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="2" \
   --raft-base-port=12000 \
   > logs/cluster2-node7.log 2>&1 &
@@ -157,7 +157,7 @@ echo -e "${GREEN}Starting Cluster 2 - Node 8 (localhost:8087, Shard 2)...${NC}"
   --data-dir=./cluster2-node8-data \
   --join=http://localhost:8086 \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="2" \
   --raft-base-port=12000 \
   > logs/cluster2-node8.log 2>&1 &
@@ -174,7 +174,7 @@ echo -e "${GREEN}Starting Cluster 2 - Node 9 (localhost:8088, Shard 2)...${NC}"
   --data-dir=./cluster2-node9-data \
   --join=http://localhost:8086 \
   --enable-raft \
-  --shard-count=3 \
+  --shard-count=6 \
   --assigned-shards="2" \
   --raft-base-port=12000 \
   > logs/cluster2-node9.log 2>&1 &

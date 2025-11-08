@@ -42,13 +42,23 @@ func startShards(cfg *config.Config, h *httpapi.Handler) *shard.MembershipManage
 		// Each node needs a unique port for each shard's Raft instance
 		// Calculate: base_port + (shard_id * 100) + node_offset
 		// This allows up to 100 nodes per shard
-		// Extract node number from nodeID (e.g., "node2" -> 2)
+		// Extract node number from nodeID (supports formats: "node2", "cluster0-node1", etc.)
 		nodeNum := 0
-		fmt.Sscanf(cfg.NodeID, "node%d", &nodeNum)
+		if strings.Contains(cfg.NodeID, "-node") {
+			// Format: "cluster0-node1" -> extract "1"
+			parts := strings.Split(cfg.NodeID, "-node")
+			if len(parts) == 2 {
+				fmt.Sscanf(parts[1], "%d", &nodeNum)
+			}
+		} else {
+			// Format: "node2" -> extract "2"
+			fmt.Sscanf(cfg.NodeID, "node%d", &nodeNum)
+		}
 		raftPort := cfg.RaftBasePort + (i * 100) + nodeNum
 		raftAddr := fmt.Sprintf("127.0.0.1:%d", raftPort)
 
-		// Don't use joinAddr for shard Raft - let membership manager handle joins
+		// Start the shard Raft instance
+		// Don't pass joinAddr here - we'll join via HTTP API after startup if needed
 		sr, err := shardraft.StartShardRaft(cfg.NodeID, shardID, raftAddr, cfg.DataDir, "")
 		if err != nil {
 			log.Printf("warning: unable to start shard raft %s at %s: %v", shardID, raftAddr, err)
@@ -56,6 +66,22 @@ func startShards(cfg *config.Config, h *httpapi.Handler) *shard.MembershipManage
 		}
 		h.ShardRafts[shardID] = sr
 		log.Printf("started shard %s raft at %s (node id %s)", shardID, raftAddr, sr.Node.ID)
+
+		// If this node is joining an existing cluster (not bootstrapping),
+		// we need to join this shard's Raft to the leader's shard Raft
+		if cfg.JoinAddr != "" {
+			// Wait a bit for the shard to stabilize
+			time.Sleep(500 * time.Millisecond)
+
+			// Try to join this shard to the leader's shard cluster
+			// The leader node should have already formed a shard cluster
+			if err := joinShardCluster(cfg.JoinAddr, sr.Node.ID, raftAddr, shardID, 10*time.Second); err != nil {
+				log.Printf("warning: failed to join shard %s cluster via %s: %v", shardID, cfg.JoinAddr, err)
+				// Continue anyway - membership manager may reconcile later
+			} else {
+				log.Printf("successfully joined shard %s cluster via %s", shardID, cfg.JoinAddr)
+			}
+		}
 
 		// Register this shard with the control plane for membership coordination
 		if cfg.ControlPlaneAddr != "" {
@@ -204,4 +230,57 @@ func registerShardWithControlPlane(controlPlaneAddr, shardID, nodeID, raftAddr s
 	}
 
 	return nil
+}
+
+// joinShardCluster attempts to join a shard's Raft cluster by making an HTTP request
+// to the leader node's join endpoint for that specific shard.
+func joinShardCluster(leaderHTTP string, nodeID string, raftAddr string, shardID string, timeout time.Duration) error {
+	type joinReq struct {
+		NodeID   string `json:"node_id"`
+		RaftAddr string `json:"raft_addr"`
+		ShardID  string `json:"shard_id"`
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	reqBody := joinReq{
+		NodeID:   nodeID,
+		RaftAddr: raftAddr,
+		ShardID:  shardID,
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	deadline := time.Now().Add(timeout)
+	try := 0
+
+	for time.Now().Before(deadline) {
+		try++
+		// Use the shard-specific join endpoint
+		url := fmt.Sprintf("%s/v1/shards/join", leaderHTTP)
+		req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("[shard-join] attempt %d: error contacting %s: %v", try, leaderHTTP, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		_ = resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
+			return nil
+		}
+
+		log.Printf("[shard-join] attempt %d: unexpected status %d from %s", try, resp.StatusCode, leaderHTTP)
+		time.Sleep(1 * time.Second)
+	}
+
+	return fmt.Errorf("shard join timed out after %s", timeout.String())
 }

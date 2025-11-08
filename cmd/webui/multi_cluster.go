@@ -20,6 +20,9 @@ import (
 	"time"
 )
 
+// Total number of shards the system can support (must match start-web-demo.sh --shard-count)
+const MaxShardCount = 6
+
 // ClusterStatus represents a Raft cluster
 type ClusterStatus struct {
 	ClusterID  string
@@ -719,15 +722,30 @@ func (ui *MultiClusterUI) refreshAllNodes() {
 		httpPort = 8080 + (nodeNum - 1)
 		raftPort = 9080 + (nodeNum - 1)
 
-		// Verify the node is actually running and responding
+		// Verify the PID file exists and the process is actually running
 		pidFile := filepath.Join(logDir, file.Name())
-		if _, err := os.Stat(pidFile); err == nil {
+		pidBytes, err := os.ReadFile(pidFile)
+		if err != nil {
+			continue
+		}
+
+		pidStr := strings.TrimSpace(string(pidBytes))
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+
+		// Check if process is actually running by checking /proc/<pid>
+		procPath := fmt.Sprintf("/proc/%d", pid)
+		if _, err := os.Stat(procPath); err == nil {
+			// Process is running, add it to the list
 			clusterNodes[clusterID] = append(clusterNodes[clusterID], struct {
 				nodeID   string
 				httpPort int
 				raftPort int
 			}{nodeID, httpPort, raftPort})
 		}
+		// If process not running, skip it (stale PID file will be ignored)
 	}
 
 	// If no dynamic clusters found, use hardcoded ones
@@ -922,7 +940,7 @@ func (ui *MultiClusterUI) startNode(nodeID string, httpPort, raftPort, shardID i
 		fmt.Sprintf("--raft-addr=127.0.0.1:%d", raftPort),
 		fmt.Sprintf("--data-dir=%s-data", nodeID),
 		"--enable-raft",
-		"--shard-count=3",
+		fmt.Sprintf("--shard-count=%d", MaxShardCount), // Use global max shard count
 		fmt.Sprintf("--assigned-shards=%d", shardID),
 	}
 
@@ -1205,31 +1223,39 @@ func (ui *MultiClusterUI) runClient(client *AutoClient) {
 	}
 }
 
-// getShardForKey determines which cluster (0, 1, or 2) owns the given key
-func (ui *MultiClusterUI) getShardForKey(key string) int {
-	hash := crc32.ChecksumIEEE([]byte(key))
-	return int(hash % 3) // 3 clusters
-}
-
 func (ui *MultiClusterUI) generateRequest(client *AutoClient) {
 	client.Counter++
 	key := fmt.Sprintf("%s:key%d", client.KeyPrefix, client.Counter)
 	value := fmt.Sprintf("value%d_t%d", client.Counter, time.Now().Unix())
 
 	// Determine which cluster owns this key (shard routing)
-	shardID := ui.getShardForKey(key)
-	clusterID := fmt.Sprintf("cluster%d", shardID)
-
-	// Get the leader of the correct cluster
+	// Hash the key to get a cluster index (0 to numClusters-1)
 	ui.mu.RLock()
-	cluster, exists := ui.clusters[clusterID]
+	numClusters := len(ui.clusters)
+	if numClusters == 0 {
+		ui.mu.RUnlock()
+		return
+	}
+
+	// Get sorted list of cluster IDs for consistent routing
+	clusterIDs := make([]string, 0, numClusters)
+	for clusterID := range ui.clusters {
+		clusterIDs = append(clusterIDs, clusterID)
+	}
+	sort.Strings(clusterIDs)
+
+	// Hash key to determine cluster index
+	hash := crc32.ChecksumIEEE([]byte(key))
+	clusterIndex := int(hash % uint32(numClusters))
+	targetClusterID := clusterIDs[clusterIndex]
+
+	// Get the leader of the target cluster
+	cluster := ui.clusters[targetClusterID]
 	var targetNode *NodeStatus
-	if exists {
-		for _, node := range cluster.Nodes {
-			if node.IsLeader && node.Healthy {
-				targetNode = node
-				break
-			}
+	for _, node := range cluster.Nodes {
+		if node.IsLeader && node.Healthy {
+			targetNode = node
+			break
 		}
 	}
 	ui.mu.RUnlock()

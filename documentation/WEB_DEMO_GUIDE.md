@@ -30,9 +30,52 @@ Open your browser to: **http://localhost:9000**
 
 ### Stop the Demo
 
+The stop script supports two modes:
+
+#### 1️⃣ Normal Stop (Default - Safe)
+
 ```bash
 ./scripts/stop-web-demo.sh
 ```
+
+**What it does:**
+- ✅ Stops all server processes
+- ✅ Stops webui process  
+- ✅ Removes all PID files (prevents stale cluster entries)
+- ⚠️ **PRESERVES** logs and data directories
+
+**Use when:** You want to debug logs later or might resume the session
+
+#### 2️⃣ Clean Stop (Complete Cleanup)
+
+```bash
+./scripts/stop-web-demo.sh --clean
+```
+
+**What it does:**
+- ✅ Everything from normal stop, **PLUS:**
+- 🗑️ Removes all `logs/cluster*.log` files
+- 🗑️ Removes all `cluster*-node*-data` directories  
+- 🗑️ Removes old `node*-data` directories (legacy format)
+- ✨ Shows exactly how many files were removed
+
+**Use when:** You want a completely fresh start for demos/testing
+
+**Examples:**
+
+```bash
+# Stop but keep logs for debugging
+./scripts/stop-web-demo.sh
+
+# Complete cleanup for fresh start  
+./scripts/stop-web-demo.sh --clean
+
+# You can also manually clean later if needed
+./scripts/stop-web-demo.sh
+rm -rf cluster*-node*-data logs/cluster*.log
+```
+
+**Note:** The script automatically cleans up **all** cluster PID files, including any dynamically added clusters (cluster3, cluster4, etc.), ensuring a clean startup next time.
 
 ---
 
@@ -285,10 +328,24 @@ grep -i "election" logs/cluster*.log
 
 ### Clean restart needed
 ```bash
+# Quick clean restart (recommended)
+./scripts/stop-web-demo.sh --clean
+./scripts/start-web-demo.sh
+
+# Or manually clean specific items
 ./scripts/stop-web-demo.sh
 rm -rf cluster*-node*-data node*-data
 ./scripts/start-web-demo.sh
 ```
+
+### Stale cluster entries showing in UI
+If you see empty cluster placeholders (e.g., cluster3, cluster4) after restart:
+```bash
+# This shouldn't happen anymore, but if it does:
+./scripts/stop-web-demo.sh --clean
+./scripts/start-web-demo.sh
+```
+The script now automatically removes stale PID files from dynamically added clusters.
 
 ---
 

@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	raft "github.com/hashicorp/raft"
 )
@@ -14,6 +16,7 @@ func (h *Handler) RegisterShardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/shards", h.shardsListHandler)          // GET list
 	mux.HandleFunc("/v1/shards/assign", h.shardsAssignHandler) // POST assign
 	mux.HandleFunc("/v1/shards/status", h.shardsStatusHandler) // GET status for all local shard rafts
+	mux.HandleFunc("/v1/shards/join", h.shardsJoinHandler)     // POST join a shard raft cluster
 }
 
 func (h *Handler) shardsListHandler(w http.ResponseWriter, r *http.Request) {
@@ -90,4 +93,65 @@ func (h *Handler) shardsStatusHandler(w http.ResponseWriter, r *http.Request) {
 	b, _ := json.Marshal(out)
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(b)
+}
+
+// shardsJoinHandler adds a node to a specific shard's Raft cluster
+func (h *Handler) shardsJoinHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		NodeID   string `json:"node_id"`
+		RaftAddr string `json:"raft_addr"`
+		ShardID  string `json:"shard_id"`
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	if req.NodeID == "" || req.RaftAddr == "" || req.ShardID == "" {
+		http.Error(w, "node_id, raft_addr, and shard_id required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the shard Raft instance
+	if h.ShardRafts == nil {
+		http.Error(w, "shard rafts not initialized", http.StatusBadRequest)
+		return
+	}
+
+	sr, exists := h.ShardRafts[req.ShardID]
+	if !exists {
+		http.Error(w, fmt.Sprintf("shard %s not found on this node", req.ShardID), http.StatusNotFound)
+		return
+	}
+
+	// Only the leader can add voters
+	if !sr.IsLeader() {
+		// Return the leader's Raft address so the client can redirect
+		if sr.Node != nil && sr.Node.Raft != nil {
+			leaderAddr := string(sr.Node.Raft.Leader())
+			w.Header().Set("X-Raft-Leader", leaderAddr)
+		}
+		http.Error(w, "not the leader for this shard", http.StatusTemporaryRedirect)
+		return
+	}
+
+	// Add the voter to the Raft cluster
+	if err := sr.AddVoter(req.NodeID, req.RaftAddr, 10*time.Second); err != nil {
+		http.Error(w, fmt.Sprintf("failed to add voter: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
