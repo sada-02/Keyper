@@ -203,8 +203,10 @@ func (h *Handler) keyHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) statusHandler(w http.ResponseWriter, r *http.Request) {
 	leader := ""
 	isLeader := false
+	raftState := "Unknown"
 	if h.RaftNode != nil {
 		leader = h.RaftNode.Leader()
+		raftState = h.RaftNode.Raft.State().String()
 		if h.RaftNode.Raft.State() == raft.Leader {
 			isLeader = true
 		}
@@ -239,6 +241,7 @@ func (h *Handler) statusHandler(w http.ResponseWriter, r *http.Request) {
 		"is_leader":   isLeader,
 		"leader_addr": leader,
 		"num_keys":    keyCount,
+		"raft_state":  raftState,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

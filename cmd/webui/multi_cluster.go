@@ -13,7 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -495,10 +497,38 @@ const multiClusterTemplate = `
         }
 
         function conductElection(clusterID) {
+            console.log('conductElection called with clusterID:', clusterID);
+            
             if (confirm('Trigger graceful leader stepdown in ' + clusterID + '?\n\nThe current leader will step down gracefully (no process kill), and a new election will occur among the remaining nodes.')) {
+                console.log('User confirmed, making API call...');
+                
                 fetch('/api/cluster/election?cluster=' + clusterID, { method: 'POST' })
-                    .then(res => res.json())
+                    .then(res => {
+                        console.log('Response received:', res.status, res.ok);
+                        
+                        if (!res.ok) {
+                            // Try to parse error as JSON
+                            return res.json().then(errData => {
+                                console.error('Error data:', errData);
+                                throw new Error(errData.error || 'HTTP error ' + res.status);
+                            }).catch((jsonErr) => {
+                                console.error('JSON parse error:', jsonErr);
+                                // If JSON parsing fails, try text
+                                return res.text().then(text => {
+                                    console.error('Error text:', text);
+                                    throw new Error(text || 'HTTP error ' + res.status);
+                                });
+                            });
+                        }
+                        return res.json();
+                    })
                     .then(data => {
+                        console.log('Success data:', data);
+                        
+                        if (data.success === false) {
+                            throw new Error(data.error || 'Election failed');
+                        }
+                        
                         let msg = 'Election completed!\n\n';
                         msg += 'Old Leader: ' + data.old_leader + '\n';
                         if (data.election_info && data.election_info.new_leader) {
@@ -509,18 +539,40 @@ const multiClusterTemplate = `
                         setTimeout(() => location.reload(), 1000);
                     })
                     .catch(err => {
-                        alert('Election failed: ' + err);
+                        console.error('Final error:', err);
+                        alert('Election failed: ' + err.message);
                     });
+            } else {
+                console.log('User cancelled election');
             }
         }
 
         function showElectionDetails(clusterID) {
-            // Fetch election status from the cluster
-            let detailsMsg = 'Fetching election details for ' + clusterID + '...\n';
-            alert(detailsMsg);
+            console.log('showElectionDetails called with clusterID:', clusterID);
             
-            // TODO: Implement detailed election status view
-            // This would show: current term, last vote, cluster members, quorum status, etc.
+            // Fetch detailed election status for all nodes in the cluster
+            fetch('/api/cluster/status?cluster=' + clusterID)
+                .then(res => res.json())
+                .then(data => {
+                    let msg = 'Election Details for ' + clusterID + '\n\n';
+                    msg += 'Cluster Size: ' + data.cluster_size + '\n';
+                    msg += 'Quorum Needed: ' + data.quorum_size + '\n';
+                    msg += 'Current Term: ' + data.term + '\n';
+                    msg += 'Current Leader: ' + data.leader + '\n\n';
+                    msg += 'Nodes:\n';
+                    if (data.nodes) {
+                        data.nodes.forEach(node => {
+                            msg += '  • ' + node.node_id + ': ' + node.state;
+                            if (node.is_leader) msg += ' (LEADER)';
+                            msg += '\n';
+                        });
+                    }
+                    alert(msg);
+                })
+                .catch(err => {
+                    console.error('Error fetching election details:', err);
+                    alert('Failed to fetch election details: ' + err.message);
+                });
         }
     </script>
 </body>
@@ -541,6 +593,11 @@ type DashboardData struct {
 }
 
 func (ui *MultiClusterUI) dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	// Prevent browser caching
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+
 	ui.mu.RLock()
 	defer ui.mu.RUnlock()
 
@@ -570,11 +627,16 @@ func (ui *MultiClusterUI) dashboardHandler(w http.ResponseWriter, r *http.Reques
 		recentLogs = recentLogs[len(recentLogs)-15:]
 	}
 
-	// Convert clusters map to slice
+	// Convert clusters map to slice and sort by cluster ID
 	clustersList := make([]*ClusterStatus, 0, len(ui.clusters))
 	for _, cluster := range ui.clusters {
 		clustersList = append(clustersList, cluster)
 	}
+
+	// Sort clusters by cluster ID to maintain consistent order
+	sort.Slice(clustersList, func(i, j int) bool {
+		return clustersList[i].ClusterID < clustersList[j].ClusterID
+	})
 
 	data := DashboardData{
 		Clusters:      clustersList,
@@ -594,7 +656,137 @@ func (ui *MultiClusterUI) dashboardHandler(w http.ResponseWriter, r *http.Reques
 
 // Refresh all nodes - organizes them into clusters
 func (ui *MultiClusterUI) refreshAllNodes() {
-	// Define the 9 nodes across 3 clusters
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+
+	// Clear existing
+	ui.clusters = make(map[string]*ClusterStatus)
+	ui.nodes = make(map[string]*NodeStatus)
+
+	// Scan for all running nodes by checking PID files
+	logDir := filepath.Join(ui.projectRoot, "logs")
+	files, err := os.ReadDir(logDir)
+	if err != nil {
+		// If logs dir doesn't exist, fall back to hardcoded clusters
+		ui.refreshHardcodedClusters()
+		return
+	}
+
+	// Map to collect nodes by cluster
+	clusterNodes := make(map[string][]struct {
+		nodeID   string
+		httpPort int
+		raftPort int
+	})
+
+	// Scan PID files to discover running nodes
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".pid") {
+			continue
+		}
+
+		// Extract node ID from filename (e.g., "cluster0-node1.pid" -> "cluster0-node1")
+		nodeID := strings.TrimSuffix(file.Name(), ".pid")
+
+		// Skip non-cluster nodes
+		if !strings.Contains(nodeID, "cluster") {
+			continue
+		}
+
+		// Extract cluster ID (e.g., "cluster0-node1" -> "cluster0")
+		parts := strings.Split(nodeID, "-")
+		if len(parts) < 2 {
+			continue
+		}
+		clusterID := parts[0]
+
+		// Try to determine ports from node ID
+		// Format: clusterX-nodeY where node Y is at port 8080 + (Y-1) for cluster0, etc.
+		var httpPort, raftPort int
+
+		// Parse node number from node ID
+		nodeNumStr := strings.TrimPrefix(parts[len(parts)-1], "node")
+		nodeNum, err := strconv.Atoi(nodeNumStr)
+		if err != nil {
+			continue
+		}
+
+		// Calculate ports based on node number
+		// cluster0 nodes: 8080-8082 (nodes 1-3)
+		// cluster1 nodes: 8083-8085 (nodes 4-6)
+		// cluster2 nodes: 8086-8088 (nodes 7-9)
+		// cluster3 nodes: 8089-8091 (nodes 10-12)
+		httpPort = 8080 + (nodeNum - 1)
+		raftPort = 9080 + (nodeNum - 1)
+
+		// Verify the node is actually running and responding
+		pidFile := filepath.Join(logDir, file.Name())
+		if _, err := os.Stat(pidFile); err == nil {
+			clusterNodes[clusterID] = append(clusterNodes[clusterID], struct {
+				nodeID   string
+				httpPort int
+				raftPort int
+			}{nodeID, httpPort, raftPort})
+		}
+	}
+
+	// If no dynamic clusters found, use hardcoded ones
+	if len(clusterNodes) == 0 {
+		ui.refreshHardcodedClusters()
+		return
+	}
+
+	// Create clusters from discovered nodes
+	colors := []string{"#3b82f6", "#f59e0b", "#10b981", "#8b5cf6", "#ec4899", "#f97316"}
+	shardID := 0
+
+	// Sort cluster IDs for consistent ordering
+	clusterIDs := make([]string, 0, len(clusterNodes))
+	for clusterID := range clusterNodes {
+		clusterIDs = append(clusterIDs, clusterID)
+	}
+	sort.Strings(clusterIDs)
+
+	for _, clusterID := range clusterIDs {
+		nodes := clusterNodes[clusterID]
+
+		// Extract shard ID from cluster name (e.g., "cluster0" -> 0)
+		shardNumStr := strings.TrimPrefix(clusterID, "cluster")
+		if shardNum, err := strconv.Atoi(shardNumStr); err == nil {
+			shardID = shardNum
+		}
+
+		color := colors[shardID%len(colors)]
+
+		cluster := &ClusterStatus{
+			ClusterID: clusterID,
+			ShardID:   shardID,
+			Nodes:     make([]*NodeStatus, 0),
+			Color:     color,
+		}
+
+		for _, nodeConfig := range nodes {
+			nodeStatus := ui.fetchNodeStatus(nodeConfig.nodeID, nodeConfig.httpPort, nodeConfig.raftPort)
+			if nodeStatus != nil {
+				cluster.Nodes = append(cluster.Nodes, nodeStatus)
+				ui.nodes[nodeConfig.nodeID] = nodeStatus
+
+				if nodeStatus.IsLeader {
+					cluster.LeaderNode = nodeConfig.nodeID
+				}
+			}
+		}
+
+		// Calculate quorum: (n/2) + 1
+		cluster.QuorumSize = (len(cluster.Nodes) / 2) + 1
+
+		ui.clusters[clusterID] = cluster
+	}
+}
+
+// refreshHardcodedClusters is the fallback for when no dynamic discovery is possible
+func (ui *MultiClusterUI) refreshHardcodedClusters() {
+	// Define the 9 nodes across 3 clusters (original hardcoded config)
 	clusterConfigs := map[string][]struct {
 		nodeID   string
 		httpPort int
@@ -616,13 +808,6 @@ func (ui *MultiClusterUI) refreshAllNodes() {
 			{"cluster2-node9", 8088, 9088},
 		},
 	}
-
-	ui.mu.Lock()
-	defer ui.mu.Unlock()
-
-	// Clear existing
-	ui.clusters = make(map[string]*ClusterStatus)
-	ui.nodes = make(map[string]*NodeStatus)
 
 	shardID := 0
 	colors := []string{"#3b82f6", "#f59e0b", "#10b981"}
@@ -776,7 +961,12 @@ func (ui *MultiClusterUI) conductElectionHandler(w http.ResponseWriter, r *http.
 	ui.mu.RUnlock()
 
 	if !exists {
-		http.Error(w, "Cluster not found", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Cluster not found",
+		})
 		return
 	}
 
@@ -793,7 +983,12 @@ func (ui *MultiClusterUI) conductElectionHandler(w http.ResponseWriter, r *http.
 	}
 
 	if leaderPort == 0 {
-		http.Error(w, "No leader found", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "No leader found in cluster",
+		})
 		return
 	}
 
@@ -809,10 +1004,27 @@ func (ui *MultiClusterUI) conductElectionHandler(w http.ResponseWriter, r *http.
 	)
 
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to trigger election: %v", err), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Failed to trigger election: %v", err),
+		})
 		return
 	}
 	defer resp.Body.Close()
+
+	// Check if the election trigger was successful
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Election trigger failed: %s", string(bodyBytes)),
+		})
+		return
+	}
 
 	// Wait for election to complete
 	time.Sleep(2 * time.Second)
@@ -907,6 +1119,76 @@ func (ui *MultiClusterUI) stopClientHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (ui *MultiClusterUI) clusterStatusHandler(w http.ResponseWriter, r *http.Request) {
+	clusterID := r.URL.Query().Get("cluster")
+
+	ui.mu.RLock()
+	cluster, exists := ui.clusters[clusterID]
+	ui.mu.RUnlock()
+
+	if !exists {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Cluster not found",
+		})
+		return
+	}
+
+	// Calculate quorum
+	quorumSize := (len(cluster.Nodes) / 2) + 1
+
+	// Find current leader and term
+	var leaderNodeID string
+	var currentTerm string
+
+	for _, node := range cluster.Nodes {
+		if node.IsLeader {
+			leaderNodeID = node.NodeID
+			// Get the term from the first leader found
+			var port int
+			fmt.Sscanf(node.HTTPAddr, ":%d", &port)
+
+			client := &http.Client{Timeout: 2 * time.Second}
+			resp, err := client.Get(fmt.Sprintf("http://localhost:%d/v1/election/status", port))
+			if err == nil {
+				var status map[string]interface{}
+				json.NewDecoder(resp.Body).Decode(&status)
+				resp.Body.Close()
+				if term, ok := status["term"].(string); ok {
+					currentTerm = term
+				}
+			}
+			break
+		}
+	}
+
+	// Collect node details
+	nodes := make([]map[string]interface{}, 0)
+	for _, node := range cluster.Nodes {
+		nodes = append(nodes, map[string]interface{}{
+			"node_id":   node.NodeID,
+			"http_addr": node.HTTPAddr,
+			"raft_addr": node.RaftAddr,
+			"state":     node.RaftState,
+			"is_leader": node.IsLeader,
+			"num_keys":  node.NumKeys,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"cluster_id":   clusterID,
+		"cluster_size": len(cluster.Nodes),
+		"quorum_size":  quorumSize,
+		"leader":       leaderNodeID,
+		"term":         currentTerm,
+		"nodes":        nodes,
+	})
 }
 
 func (ui *MultiClusterUI) runClient(client *AutoClient) {
@@ -1025,6 +1307,7 @@ func RunMultiClusterUI(projectRoot string, port int) {
 	http.HandleFunc("/api/client/stop", ui.stopClientHandler)
 	http.HandleFunc("/api/cluster/add", ui.addClusterHandler)
 	http.HandleFunc("/api/cluster/election", ui.conductElectionHandler)
+	http.HandleFunc("/api/cluster/status", ui.clusterStatusHandler)
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("🌐 Multi-Cluster Dashboard starting on http://localhost%s", addr)

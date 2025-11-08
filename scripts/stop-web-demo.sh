@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Stop Keyper Web Demo
+# Stop Keyper Multi-Cluster Web Demo
 
-echo "🛑 Stopping Keyper Web Demo Environment..."
+echo "🛑 Stopping Keyper Multi-Cluster Demo Environment..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -14,20 +14,29 @@ if [ -f logs/webui.pid ]; then
     rm logs/webui.pid
 fi
 
-if [ -f logs/node1.pid ]; then
-    kill $(cat logs/node1.pid) 2>/dev/null && echo "✅ Stopped Node 1"
-    rm logs/node1.pid
-fi
+# Cluster 0
+for node in cluster0-node1 cluster0-node2 cluster0-node3; do
+    if [ -f logs/$node.pid ]; then
+        kill $(cat logs/$node.pid) 2>/dev/null && echo "✅ Stopped $node"
+        rm logs/$node.pid
+    fi
+done
 
-if [ -f logs/node2.pid ]; then
-    kill $(cat logs/node2.pid) 2>/dev/null && echo "✅ Stopped Node 2"
-    rm logs/node2.pid
-fi
+# Cluster 1
+for node in cluster1-node4 cluster1-node5 cluster1-node6; do
+    if [ -f logs/$node.pid ]; then
+        kill $(cat logs/$node.pid) 2>/dev/null && echo "✅ Stopped $node"
+        rm logs/$node.pid
+    fi
+done
 
-if [ -f logs/node3.pid ]; then
-    kill $(cat logs/node3.pid) 2>/dev/null && echo "✅ Stopped Node 3"
-    rm logs/node3.pid
-fi
+# Cluster 2
+for node in cluster2-node7 cluster2-node8 cluster2-node9; do
+    if [ -f logs/$node.pid ]; then
+        kill $(cat logs/$node.pid) 2>/dev/null && echo "✅ Stopped $node"
+        rm logs/$node.pid
+    fi
+done
 
 # Fallback: kill by process name
 pkill -f "bin/server" 2>/dev/null
@@ -35,4 +44,4 @@ pkill -f "bin/webui" 2>/dev/null
 
 echo "✅ All services stopped"
 echo ""
-echo "To clean data directories, run: ./scripts/clean.sh"
+echo "To clean data directories, run: rm -rf cluster*-node*-data node*-data"

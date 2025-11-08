@@ -135,28 +135,38 @@ See `performance/README.md` for detailed documentation.
 
 ### 🌐 Interactive Web Demo (Recommended for Testing)
 
-For an interactive visualization and testing experience:
+For an interactive visualization and testing experience with multi-cluster sharding:
 
 ```bash
-# Start cluster with web UI
+# Start multi-cluster setup with web UI
 ./scripts/start-web-demo.sh
 ```
 
 This will automatically:
-- Start a 3-node Raft cluster
-- Launch the web UI on port 9000
+- Start **3 independent Raft clusters** (9 nodes total)
+  - Cluster 0 (Shard 0): nodes 1-3 on ports 8080-8082
+  - Cluster 1 (Shard 1): nodes 4-6 on ports 8083-8085
+  - Cluster 2 (Shard 2): nodes 7-9 on ports 8086-8088
+- Launch the multi-cluster web UI on port 9000
 - Open your browser (if available)
 
 Then open your browser to:
-- **Server Monitor**: http://localhost:9000/server (view cluster state, leaders, key distribution)
-- **Client Interface**: http://localhost:9000/client (send requests, see history)
+- **Multi-Cluster Dashboard**: http://localhost:9000
 
 The web demo provides:
-- ✅ Real-time cluster visualization (leaders, followers)
-- ✅ Interactive client for sending PUT/GET/DELETE requests
-- ✅ Live key distribution across nodes
-- ✅ Request history with timestamps and responses
-- ✅ Auto-refresh every 2 seconds
+- ✅ **Real-time cluster visualization** - View all 3 clusters with their leaders and followers
+- ✅ **Automated test clients** - Generate distributed traffic across shards
+- ✅ **Shard-aware routing** - Keys automatically routed to correct cluster via CRC32 hashing
+- ✅ **Request history** - Live feed of all operations with timestamps and responses
+- ✅ **Leader election triggers** - Test graceful leader stepdown and failover
+- ✅ **Dynamic cluster management** - Add new clusters on-the-fly
+- ✅ **Auto-refresh every 3 seconds** - Always up-to-date cluster state
+
+**Features**:
+- Each cluster runs an independent Raft consensus group
+- Keys are distributed across clusters using consistent hashing
+- Full fault tolerance within each cluster (survives 1 node failure per cluster)
+- Real-time monitoring of leaders, followers, and key distribution
 
 **Stop the web demo:**
 
