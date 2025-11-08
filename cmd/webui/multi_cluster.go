@@ -384,9 +384,6 @@ const multiClusterTemplate = `
                             <button class="election-btn" onclick="conductElection('{{.ClusterID}}')">
                                 🗳️ Graceful Election
                             </button>
-                            <button class="election-btn" style="background: #3b82f6;" onclick="showElectionDetails('{{.ClusterID}}')">
-                                📊 Details
-                            </button>
                         </div>
                     </div>
 
@@ -505,22 +502,31 @@ const multiClusterTemplate = `
             if (confirm('Trigger graceful leader stepdown in ' + clusterID + '?\n\nThe current leader will step down gracefully (no process kill), and a new election will occur among the remaining nodes.')) {
                 console.log('User confirmed, making API call...');
                 
-                fetch('/api/cluster/election?cluster=' + clusterID, { method: 'POST' })
+                // Create abort controller for timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+                
+                fetch('/api/cluster/election?cluster=' + clusterID, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    signal: controller.signal
+                })
                     .then(res => {
                         console.log('Response received:', res.status, res.ok);
+                        clearTimeout(timeoutId);
                         
                         if (!res.ok) {
                             // Try to parse error as JSON
-                            return res.json().then(errData => {
-                                console.error('Error data:', errData);
-                                throw new Error(errData.error || 'HTTP error ' + res.status);
-                            }).catch((jsonErr) => {
-                                console.error('JSON parse error:', jsonErr);
-                                // If JSON parsing fails, try text
-                                return res.text().then(text => {
-                                    console.error('Error text:', text);
-                                    throw new Error(text || 'HTTP error ' + res.status);
-                                });
+                            return res.text().then(text => {
+                                console.error('Error response text:', text);
+                                try {
+                                    const errData = JSON.parse(text);
+                                    throw new Error(errData.error || 'HTTP error ' + res.status);
+                                } catch (parseErr) {
+                                    throw new Error('HTTP error ' + res.status + ': ' + text);
+                                }
                             });
                         }
                         return res.json();
@@ -536,14 +542,21 @@ const multiClusterTemplate = `
                         msg += 'Old Leader: ' + data.old_leader + '\n';
                         if (data.election_info && data.election_info.new_leader) {
                             msg += 'New Leader: ' + data.election_info.new_leader + '\n';
-                            msg += 'Term: ' + data.election_info.term;
+                            if (data.election_info.term) {
+                                msg += 'Term: ' + data.election_info.term;
+                            }
                         }
                         alert(msg);
                         setTimeout(() => location.reload(), 1000);
                     })
                     .catch(err => {
+                        clearTimeout(timeoutId);
                         console.error('Final error:', err);
-                        alert('Election failed: ' + err.message);
+                        if (err.name === 'AbortError') {
+                            alert('Election failed: Request timeout (took more than 15 seconds)');
+                        } else {
+                            alert('Election failed: ' + (err.message || 'Unknown error'));
+                        }
                     });
             } else {
                 console.log('User cancelled election');
@@ -1014,9 +1027,13 @@ func (ui *MultiClusterUI) conductElectionHandler(w http.ResponseWriter, r *http.
 	electionReq := map[string]string{"method": "stepdown"}
 	reqBody, _ := json.Marshal(electionReq)
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	// Use a client with a reasonable timeout
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// Make the election trigger request
+	electionURL := fmt.Sprintf("http://localhost:%d/v1/election/trigger", leaderPort)
 	resp, err := client.Post(
-		fmt.Sprintf("http://localhost:%d/v1/election/trigger", leaderPort),
+		electionURL,
 		"application/json",
 		bytes.NewBuffer(reqBody),
 	)
@@ -1032,41 +1049,34 @@ func (ui *MultiClusterUI) conductElectionHandler(w http.ResponseWriter, r *http.
 	}
 	defer resp.Body.Close()
 
+	// Read the election response
+	respBody, _ := io.ReadAll(resp.Body)
+	var electionResp map[string]interface{}
+	json.Unmarshal(respBody, &electionResp)
+
 	// Check if the election trigger was successful
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
-			"error":   fmt.Sprintf("Election trigger failed: %s", string(bodyBytes)),
+			"error":   fmt.Sprintf("Election trigger failed with status %d: %s", resp.StatusCode, string(respBody)),
 		})
 		return
 	}
 
-	// Wait for election to complete
-	time.Sleep(2 * time.Second)
+	// Extract data from election response
+	newLeader := ""
+	if electionResp["new_leader"] != nil {
+		newLeader = electionResp["new_leader"].(string)
+	}
 
-	// Get election status from cluster nodes
-	electionInfo := make(map[string]interface{})
-	for _, node := range cluster.Nodes {
-		var port int
-		fmt.Sscanf(node.HTTPAddr, ":%d", &port)
-
-		statusResp, err := client.Get(fmt.Sprintf("http://localhost:%d/v1/election/status", port))
-		if err == nil {
-			var status map[string]interface{}
-			json.NewDecoder(statusResp.Body).Decode(&status)
-			statusResp.Body.Close()
-
-			if status["is_leader"] == true {
-				electionInfo["new_leader"] = status["node_id"]
-				electionInfo["term"] = status["term"]
-			}
-		}
+	electionInfo := map[string]interface{}{
+		"new_leader": newLeader,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":       true,
 		"message":       fmt.Sprintf("Leader %s stepped down gracefully, new election completed", leaderNodeID),
